@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:pivotX="54"
+        android:pivotY="54">
+        <!-- PDF Document Base Sheet -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M33,26 L63,26 L75,38 L75,80 C75,82.2 73.2,84 71,84 L33,84 C30.8,84 29,82.2 29,80 L29,30 C29,27.8 30.8,26 33,26 Z" />
+
+        <!-- Folded Corner -->
+        <path
+            android:fillColor="#CBD5E1"
+            android:pathData="M63,26 L63,38 L75,38 Z" />
+
+        <!-- Highlight Stroke on Page -->
+        <path
+            android:fillColor="#FBBF24"
+            android:pathData="M37,45 L67,45 L67,50 L37,50 Z" />
+
+        <!-- Text Lines -->
+        <path
+            android:fillColor="#94A3B8"
+            android:pathData="M37,55 L65,55 L65,57.5 L37,57.5 Z" />
+        <path
+            android:fillColor="#94A3B8"
+            android:pathData="M37,62 L58,62 L58,64.5 L37,64.5 Z" />
+
+        <!-- Red PDF Badge Banner -->
+        <path
+            android:fillColor="#EF4444"
+            android:pathData="M27,68 L48,68 C49.1,68 50,68.9 50,70 L50,79 C50,80.1 49.1,81 48,81 L27,81 C25.9,81 25,80.1 25,79 L25,70 C25,68.9 25.9,68 27,68 Z" />
+
+        <!-- "PDF" Text on Badge simulated with crisp paths -->
+        <!-- P -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M29,71.5 L33,71.5 C34.1,71.5 34.8,72.2 34.8,73.2 C34.8,74.2 34.1,74.9 33,74.9 L30.5,74.9 L30.5,77.5 L29,77.5 Z M30.5,72.7 L30.5,73.7 L32.8,73.7 C33.1,73.7 33.4,73.5 33.4,73.2 C33.4,72.9 33.1,72.7 32.8,72.7 Z" />
+        <!-- D -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M36,71.5 L39.2,71.5 C40.8,71.5 41.8,72.6 41.8,74.5 C41.8,76.4 40.8,77.5 39.2,77.5 L36,77.5 Z M37.5,72.7 L37.5,76.3 L39,76.3 C39.8,76.3 40.3,75.6 40.3,74.5 C40.3,73.4 39.8,72.7 39,72.7 Z" />
+        <!-- F -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M43,71.5 L47.5,71.5 L47.5,72.7 L44.5,72.7 L44.5,74 L47,74 L47,75.2 L44.5,75.2 L44.5,77.5 L43,77.5 Z" />
+
+        <!-- Stylus / Annotation Pen floating on bottom-right -->
+        <path
+            android:fillColor="#38BDF8"
+            android:pathData="M66,62 L74,54 L81,61 L73,69 Z" />
+        <path
+            android:fillColor="#0284C7"
+            android:pathData="M66,62 L64,71 L73,69 Z" />
+        <path
+            android:fillColor="#0F172A"
+            android:pathData="M64,71 L63,73 L66,72 Z" />
+        <path
+            android:fillColor="#E2E8F0"
+            android:pathData="M78.5,51.5 C79.5,50.5 81.5,50.5 82.5,51.5 L83.5,52.5 C84.5,53.5 84.5,55.5 83.5,56.5 L80,60 L75,55 Z" />
+    </group>
+</vector>

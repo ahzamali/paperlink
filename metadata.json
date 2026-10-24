@@ -1,0 +1,6 @@
+{
+  "name": "PaperInk PDF",
+  "description": "Offline PDF reader and editor with seamless text highlighting, handwriting annotations, custom folder organization, night reading mode, and mobile printing.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
