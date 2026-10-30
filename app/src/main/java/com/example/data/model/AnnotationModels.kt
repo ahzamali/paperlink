@@ -92,34 +92,46 @@ enum class CompressionLevel(
     val description: String,
     val targetWidth: Int,
     val jpegQuality: Int,
-    val estReduction: String
+    val estReduction: String,
+    val estimatedBytesPerPage: Long
 ) {
     HIGH(
         title = "Extreme Compression",
         description = "Smallest size, ideal for email & messaging",
         targetWidth = 850,
         jpegQuality = 60,
-        estReduction = "60-80%"
+        estReduction = "60-80%",
+        estimatedBytesPerPage = 95 * 1024L
     ),
     BALANCED(
         title = "Balanced (Recommended)",
         description = "Great balance of crisp text and small file size",
         targetWidth = 1200,
         jpegQuality = 80,
-        estReduction = "40-60%"
+        estReduction = "40-60%",
+        estimatedBytesPerPage = 210 * 1024L
     ),
     LIGHT(
         title = "Light Compression",
         description = "High resolution preserved with minor size reduction",
         targetWidth = 1600,
         jpegQuality = 90,
-        estReduction = "20-35%"
+        estReduction = "20-35%",
+        estimatedBytesPerPage = 420 * 1024L
     )
 }
+
+data class CompressionEstimate(
+    val estimatedSizeBytes: Long,
+    val estimatedSavingsPercentage: Int,
+    val willLikelyIncrease: Boolean,
+    val recommendation: String
+)
 
 data class CompressionResult(
     val originalSizeBytes: Long,
     val compressedSizeBytes: Long,
     val savedPercentage: Int,
-    val outputFile: java.io.File
+    val outputFile: java.io.File,
+    val isLarger: Boolean = compressedSizeBytes > originalSizeBytes
 )
