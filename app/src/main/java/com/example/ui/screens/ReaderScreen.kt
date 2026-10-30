@@ -1181,6 +1181,7 @@ fun ReaderScreen(
         CompressPdfDialog(
             docTitle = uiState.document?.title ?: "Document",
             originalSizeBytes = uiState.document?.fileSizeBytes ?: 0L,
+            pageCount = uiState.document?.pageCount ?: 1,
             isCompressing = uiState.isCompressing,
             compressionResult = uiState.compressionResult,
             onDismiss = { viewModel.setCompressDialogVisible(false) },

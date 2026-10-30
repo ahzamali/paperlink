@@ -19,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.TrendingDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
@@ -46,6 +47,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.data.model.CompressionLevel
 import com.example.data.model.CompressionResult
+import com.example.pdf.PdfEngine
+import kotlin.math.abs
 
 fun formatFileSize(bytes: Long): String {
     if (bytes <= 0) return "0 B"
@@ -62,6 +65,7 @@ fun formatFileSize(bytes: Long): String {
 fun CompressPdfDialog(
     docTitle: String,
     originalSizeBytes: Long,
+    pageCount: Int = 1,
     isCompressing: Boolean,
     compressionResult: CompressionResult?,
     onDismiss: () -> Unit,
@@ -70,6 +74,10 @@ fun CompressPdfDialog(
     onExportSave: ((CompressionResult) -> Unit)? = null
 ) {
     var selectedLevel by remember { mutableStateOf(CompressionLevel.BALANCED) }
+
+    val currentEstimate = remember(originalSizeBytes, pageCount, selectedLevel) {
+        PdfEngine.estimateCompressedSize(originalSizeBytes, pageCount, selectedLevel)
+    }
 
     AlertDialog(
         onDismissRequest = { if (!isCompressing) onDismiss() },
@@ -114,73 +122,149 @@ fun CompressPdfDialog(
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
                 if (compressionResult != null) {
-                    // Success View
-                    Surface(
-                        shape = RoundedCornerShape(14.dp),
-                        color = Color(0xFFECFDF5),
-                        border = BorderStroke(1.dp, Color(0xFFA7F3D0)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(16.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
+                    // Result View
+                    if (compressionResult.isLarger) {
+                        // Advisory banner when compression increased file size
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = Color(0xFFFFFBEB),
+                            border = BorderStroke(1.dp, Color(0xFFFDE68A)),
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Surface(
-                                    shape = CircleShape,
-                                    color = Color(0xFF10B981),
-                                    modifier = Modifier.size(24.dp)
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(Icons.Default.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
-                                    }
-                                }
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "${compressionResult.savedPercentage}% Smaller",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF065F46)
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.height(10.dp))
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceEvenly,
-                                verticalAlignment = Alignment.CenterVertically
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Text("Original", style = MaterialTheme.typography.labelSmall, color = Color(0xFF6B7280))
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = Color(0xFFF59E0B),
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                Icons.Default.Info,
+                                                contentDescription = null,
+                                                tint = Color.White,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
                                     Text(
-                                        formatFileSize(compressionResult.originalSizeBytes),
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = Color(0xFF374151)
-                                    )
-                                }
-                                Text("➔", style = MaterialTheme.typography.titleMedium, color = Color(0xFF10B981))
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Text("Compressed", style = MaterialTheme.typography.labelSmall, color = Color(0xFF047857))
-                                    Text(
-                                        formatFileSize(compressionResult.compressedSizeBytes),
+                                        text = "File Increased in Size (+${abs(compressionResult.savedPercentage)}%)",
                                         style = MaterialTheme.typography.titleSmall,
                                         fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF047857)
+                                        color = Color(0xFF92400E)
                                     )
+                                }
+
+                                Spacer(modifier = Modifier.height(10.dp))
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceEvenly,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("Original", style = MaterialTheme.typography.labelSmall, color = Color(0xFF6B7280))
+                                        Text(
+                                            formatFileSize(compressionResult.originalSizeBytes),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = Color(0xFF374151)
+                                        )
+                                    }
+                                    Text("➔", style = MaterialTheme.typography.titleMedium, color = Color(0xFFF59E0B))
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("Rasterized", style = MaterialTheme.typography.labelSmall, color = Color(0xFF92400E))
+                                        Text(
+                                            formatFileSize(compressionResult.compressedSizeBytes),
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF92400E)
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                Text(
+                                    text = "The original document primarily contains vector text or fonts. Converting pages to JPEG images expanded the size. You can export or share this version, or keep the original.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(0xFF78350F)
+                                )
+                            }
+                        }
+                    } else {
+                        // Success View (file got smaller)
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = Color(0xFFECFDF5),
+                            border = BorderStroke(1.dp, Color(0xFFA7F3D0)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = Color(0xFF10B981),
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(Icons.Default.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "${compressionResult.savedPercentage}% Smaller",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF065F46)
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.height(10.dp))
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceEvenly,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("Original", style = MaterialTheme.typography.labelSmall, color = Color(0xFF6B7280))
+                                        Text(
+                                            formatFileSize(compressionResult.originalSizeBytes),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = Color(0xFF374151)
+                                        )
+                                    }
+                                    Text("➔", style = MaterialTheme.typography.titleMedium, color = Color(0xFF10B981))
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("Compressed", style = MaterialTheme.typography.labelSmall, color = Color(0xFF047857))
+                                        Text(
+                                            formatFileSize(compressionResult.compressedSizeBytes),
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF047857)
+                                        )
+                                    }
                                 }
                             }
                         }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        Text(
+                            text = "Your compressed PDF has been saved and is ready to share or open.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    Text(
-                        text = "Your compressed PDF has been saved and is ready to share or open.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
                 } else if (isCompressing) {
                     // Loading View
                     Column(
@@ -214,8 +298,10 @@ fun CompressPdfDialog(
                         maxLines = 1
                     )
                     if (originalSizeBytes > 0) {
+                        val perPage = if (pageCount > 0) originalSizeBytes / pageCount else 0L
                         Text(
-                            text = "Current size: ${formatFileSize(originalSizeBytes)}",
+                            text = "Current size: ${formatFileSize(originalSizeBytes)}" +
+                                if (pageCount > 1) " ($pageCount pages, ~${formatFileSize(perPage)}/page)" else "",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.Bold
@@ -233,6 +319,10 @@ fun CompressPdfDialog(
 
                     CompressionLevel.values().forEach { level ->
                         val isSelected = selectedLevel == level
+                        val levelEst = remember(originalSizeBytes, pageCount, level) {
+                            PdfEngine.estimateCompressedSize(originalSizeBytes, pageCount, level)
+                        }
+
                         Surface(
                             shape = RoundedCornerShape(10.dp),
                             color = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
@@ -263,23 +353,71 @@ fun CompressPdfDialog(
                                             style = MaterialTheme.typography.bodyMedium,
                                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                                         )
-                                        Surface(
-                                            shape = RoundedCornerShape(4.dp),
-                                            color = MaterialTheme.colorScheme.secondaryContainer
-                                        ) {
-                                            Text(
-                                                text = "-${level.estReduction}",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                                fontWeight = FontWeight.Bold,
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                            )
+                                        if (levelEst.willLikelyIncrease && originalSizeBytes > 0) {
+                                            Surface(
+                                                shape = RoundedCornerShape(4.dp),
+                                                color = Color(0xFFFEF3C7)
+                                            ) {
+                                                Text(
+                                                    text = "⚠️ +${abs(levelEst.estimatedSavingsPercentage)}%",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = Color(0xFF92400E),
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                        } else {
+                                            Surface(
+                                                shape = RoundedCornerShape(4.dp),
+                                                color = MaterialTheme.colorScheme.secondaryContainer
+                                            ) {
+                                                Text(
+                                                    text = if (originalSizeBytes > 0) "-${levelEst.estimatedSavingsPercentage}%" else "-${level.estReduction}",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                )
+                                            }
                                         }
                                     }
                                     Text(
-                                        text = level.description,
+                                        text = "${level.description} • Est: ~${formatFileSize(levelEst.estimatedSizeBytes)}",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Warning card when selected compression is predicted to increase file size
+                    if (currentEstimate.willLikelyIncrease && originalSizeBytes > 0) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = Color(0xFFFFFBEB),
+                            border = BorderStroke(1.dp, Color(0xFFFDE68A)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(10.dp),
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                Text("⚠️", style = MaterialTheme.typography.bodyMedium)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        text = "Compression will likely increase size",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF92400E)
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = currentEstimate.recommendation,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color(0xFF78350F)
                                     )
                                 }
                             }
@@ -318,7 +456,7 @@ fun CompressPdfDialog(
                     onClick = { onCompress(selectedLevel) },
                     modifier = Modifier.testTag("start_compression_button")
                 ) {
-                    Text("Compress Document")
+                    Text(if (currentEstimate.willLikelyIncrease && originalSizeBytes > 0) "Compress Anyway" else "Compress Document")
                 }
             }
         },

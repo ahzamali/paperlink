@@ -396,6 +396,7 @@ fun LibraryScreen(
         CompressPdfDialog(
             docTitle = doc.title,
             originalSizeBytes = doc.fileSizeBytes,
+            pageCount = doc.pageCount,
             isCompressing = uiState.isCompressing,
             compressionResult = uiState.compressionResult,
             onDismiss = { viewModel.dismissCompressDialog() },

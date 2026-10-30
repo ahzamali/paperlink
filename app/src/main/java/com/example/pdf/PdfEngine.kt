@@ -14,6 +14,7 @@ import android.graphics.pdf.PdfDocument
 import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
 import android.util.LruCache
+import com.example.data.model.CompressionEstimate
 import com.example.data.model.CompressionLevel
 import com.example.data.model.CompressionResult
 import com.example.data.model.NormalizedPoint
@@ -50,7 +51,7 @@ object PdfEngine {
     }
 
     private var appContext: Context? = null
-    private const val MAX_FILE_READ_BYTES = 35 * 1024 * 1024L // 35 MB memory guard
+    private const val MAX_FILE_READ_BYTES = 20 * 1024 * 1024L // 20 MB memory guard
 
     // Active renderer session cache to prevent tearing down/rebuilding PdfRenderer on each scrolled page
     private var cachedRendererPath: String? = null
@@ -169,17 +170,36 @@ object PdfEngine {
         }
     }
 
-    fun readBytesFromLocation(location: String): ByteArray? {
+    fun readBytesFromLocation(location: String, maxLimit: Int = 20 * 1024 * 1024): ByteArray? {
         return try {
+            if (!location.startsWith("content://")) {
+                val f = File(location)
+                if (f.exists()) {
+                    val len = f.length()
+                    val toRead = len.coerceAtMost(maxLimit.toLong()).toInt()
+                    val buf = ByteArray(toRead)
+                    FileInputStream(f).use { stream ->
+                        var offset = 0
+                        while (offset < toRead) {
+                            val r = stream.read(buf, offset, toRead - offset)
+                            if (r <= 0) break
+                            offset += r
+                        }
+                    }
+                    return buf
+                }
+            }
             openInputStreamForLocation(location)?.use { stream ->
                 val buffer = ByteArrayOutputStream()
                 val data = ByteArray(16384)
                 var nRead: Int
                 var total = 0
-                val maxLimit = 100 * 1024 * 1024 // 100 MB safe limit
                 while (stream.read(data, 0, data.size).also { nRead = it } != -1) {
                     total += nRead
-                    if (total > maxLimit) return null
+                    if (total > maxLimit) {
+                        buffer.write(data, 0, nRead)
+                        break
+                    }
                     buffer.write(data, 0, nRead)
                 }
                 buffer.toByteArray()
@@ -335,6 +355,97 @@ object PdfEngine {
         }
     }
 
+    /**
+     * Estimates the compressed PDF size based on page count, current file size, and target compression level.
+     * Prevents misleading compression when compact vector PDFs would actually increase in size upon rasterization.
+     */
+    fun estimateCompressedSize(
+        originalSizeBytes: Long,
+        pageCount: Int,
+        level: CompressionLevel
+    ): CompressionEstimate {
+        val pages = pageCount.coerceAtLeast(1)
+        val basePdfOverhead = 15 * 1024L
+        val estimatedOutput = (pages * level.estimatedBytesPerPage) + basePdfOverhead
+
+        fun formatBytes(bytes: Long): String {
+            if (bytes <= 0) return "0 B"
+            val kb = bytes / 1024.0
+            val mb = kb / 1024.0
+            return when {
+                mb >= 1.0 -> "%.1f MB".format(mb)
+                kb >= 1.0 -> "%.1f KB".format(kb)
+                else -> "$bytes B"
+            }
+        }
+
+        if (originalSizeBytes <= 0L) {
+            return CompressionEstimate(
+                estimatedSizeBytes = estimatedOutput,
+                estimatedSavingsPercentage = 0,
+                willLikelyIncrease = false,
+                recommendation = "Estimated size: ~${formatBytes(estimatedOutput)}"
+            )
+        }
+
+        val willIncrease = estimatedOutput > originalSizeBytes
+        val diff = originalSizeBytes - estimatedOutput
+        val savingsPct = if (willIncrease) {
+            -(((estimatedOutput - originalSizeBytes).toFloat() / originalSizeBytes) * 100).toInt()
+        } else {
+            ((diff.toFloat() / originalSizeBytes) * 100).toInt()
+        }
+
+        val avgBytesPerPage = originalSizeBytes / pages
+        val recommendation = if (willIncrease) {
+            "This document is already very compact (~${formatBytes(avgBytesPerPage)}/page, primarily vector text). Re-rasterizing pages to JPEG will likely INCREASE file size from ${formatBytes(originalSizeBytes)} to ~${formatBytes(estimatedOutput)}."
+        } else {
+            "Estimated reduction of ~${savingsPct}% (${formatBytes(originalSizeBytes)} → ~${formatBytes(estimatedOutput)})."
+        }
+
+        return CompressionEstimate(
+            estimatedSizeBytes = estimatedOutput,
+            estimatedSavingsPercentage = savingsPct,
+            willLikelyIncrease = willIncrease,
+            recommendation = recommendation
+        )
+    }
+
+    /**
+     * Optional single-page probe to sample actual compression size on page 0 in real-time.
+     */
+    suspend fun sampleSinglePageCompression(
+        sourceLocation: String,
+        level: CompressionLevel,
+        pageIndex: Int = 0
+    ): Long? = withContext(Dispatchers.IO) {
+        synchronized(rendererLock) {
+            try {
+                val renderer = getOrCreateRenderer(sourceLocation) ?: return@withContext null
+                if (renderer.pageCount <= 0 || pageIndex >= renderer.pageCount) return@withContext null
+                renderer.openPage(pageIndex).use { page ->
+                    val origW = if (page.width > 0) page.width else 600
+                    val origH = if (page.height > 0) page.height else 850
+                    val scale = level.targetWidth.toFloat() / origW.toFloat()
+                    val targetHeight = ((origH * scale).toInt()).coerceIn(100, 4096)
+
+                    val bmp = Bitmap.createBitmap(level.targetWidth, targetHeight, Bitmap.Config.RGB_565)
+                    val canvas = Canvas(bmp)
+                    canvas.drawColor(Color.WHITE)
+                    page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
+
+                    val stream = ByteArrayOutputStream()
+                    bmp.compress(Bitmap.CompressFormat.JPEG, level.jpegQuality, stream)
+                    bmp.recycle()
+                    stream.size().toLong()
+                }
+            } catch (e: Throwable) {
+                e.printStackTrace()
+                null
+            }
+        }
+    }
+
     suspend fun compressPdf(
         sourceLocation: String,
         destFile: File,
@@ -381,10 +492,11 @@ object PdfEngine {
                             val scale = targetWidth.toFloat() / origW.toFloat()
                             val targetHeight = ((origH * scale).toInt()).coerceIn(100, 4096)
 
+                            // Use RGB_565 to cut memory footprint in half (2 bytes/pixel vs 4) and prevent OOM
                             val fullBitmap = Bitmap.createBitmap(
                                 targetWidth,
                                 targetHeight,
-                                Bitmap.Config.ARGB_8888
+                                Bitmap.Config.RGB_565
                             )
                             val baseCanvas = Canvas(fullBitmap)
                             baseCanvas.drawColor(Color.WHITE)
@@ -436,18 +548,25 @@ object PdfEngine {
                 pdfDoc.close()
 
                 val compressedSize = destFile.length()
+                val isLarger = compressedSize > originalSize && originalSize > 0
                 val savedPct = if (originalSize > 0) {
-                    (((originalSize - compressedSize).toFloat() / originalSize) * 100).toInt().coerceAtLeast(0)
+                    if (isLarger) {
+                        -(((compressedSize - originalSize).toFloat() / originalSize) * 100).toInt()
+                    } else {
+                        (((originalSize - compressedSize).toFloat() / originalSize) * 100).toInt()
+                    }
                 } else 0
 
                 CompressionResult(
                     originalSizeBytes = originalSize,
                     compressedSizeBytes = compressedSize,
                     savedPercentage = savedPct,
-                    outputFile = destFile
+                    outputFile = destFile,
+                    isLarger = isLarger
                 )
             } catch (e: Throwable) {
                 e.printStackTrace()
+                try { destFile.delete() } catch (_: Throwable) {}
                 null
             }
         }
@@ -571,114 +690,117 @@ object PdfEngine {
         val q = query.trim().lowercase()
         if (q.isBlank()) return@withContext emptyList()
 
-        val pageContentMap = extractedTextCache.get(filePath) ?: run {
-            val extracted = extractTextFromPdf(filePath, pageCount)
-            extractedTextCache.put(filePath, extracted)
-            extracted
-        }
-
-        val results = mutableListOf<PdfSearchMatch>()
-
-        for (p in 0 until pageCount) {
-            val pageData = pageContentMap[p] ?: ExtractedPageData("", emptyList())
-            val pageText = pageData.fullText
-            val lowerText = pageText.lowercase()
-
-            // 1. Search extracted document page text
-            var startIndex = 0
-            while (startIndex < lowerText.length) {
-                val foundIdx = lowerText.indexOf(q, startIndex)
-                if (foundIdx < 0) break
-
-                val snippetStart = (foundIdx - 28).coerceAtLeast(0)
-                val snippetEnd = (foundIdx + q.length + 32).coerceAtMost(pageText.length)
-                val snippet = pageText.substring(snippetStart, snippetEnd).trim()
-                val prefix = if (snippetStart > 0) "..." else ""
-                val suffix = if (snippetEnd < pageText.length) "..." else ""
-
-                // Compute bounding highlight rects for this match
-                val matchRects = mutableListOf<SearchHighlightRect>()
-
-                // Check positioned spans on this page
-                val matchingSpans = pageData.spans.filter { it.text.lowercase().contains(q) }
-                for (span in matchingSpans) {
-                    val sLower = span.text.lowercase()
-                    var spanOffset = 0
-                    while (spanOffset < sLower.length) {
-                        val subIdx = sLower.indexOf(q, spanOffset)
-                        if (subIdx < 0) break
-                        val charW = (span.normRight - span.normLeft) / span.text.length.coerceAtLeast(1)
-                        val left = (span.normLeft + subIdx * charW).coerceIn(0f, 1f)
-                        val right = (left + q.length * charW).coerceIn(left + 0.005f, 1f)
-                        matchRects.add(
-                            SearchHighlightRect(
-                                left = left,
-                                top = span.normTop,
-                                right = right,
-                                bottom = span.normBottom
-                            )
-                        )
-                        spanOffset = subIdx + q.length.coerceAtLeast(1)
-                    }
-                }
-
-                // If spans had no direct match, provide smooth proportional highlight based on text position
-                if (matchRects.isEmpty()) {
-                    val charProgress = (foundIdx.toFloat() / pageText.length.coerceAtLeast(1)).coerceIn(0f, 1f)
-                    val estTop = (0.07f + 0.82f * charProgress).coerceIn(0.05f, 0.92f)
-                    val estBottom = (estTop + 0.026f).coerceIn(0.06f, 0.95f)
-                    matchRects.add(
-                        SearchHighlightRect(
-                            left = 0.07f,
-                            top = estTop,
-                            right = 0.65f,
-                            bottom = estBottom
-                        )
-                    )
-                }
-
-                results.add(
-                    PdfSearchMatch(
-                        pageIndex = p,
-                        snippet = "$prefix$snippet$suffix",
-                        matchTerm = query,
-                        source = "Document Text",
-                        rects = matchRects
-                    )
-                )
-
-                startIndex = foundIdx + q.length.coerceAtLeast(1)
+        try {
+            val pageContentMap = extractedTextCache.get(filePath) ?: run {
+                val extracted = extractTextFromPdf(filePath, pageCount)
+                extractedTextCache.put(filePath, extracted)
+                extracted
             }
 
-            // 2. Search user text notes & annotations on this page
-            val notes = allPageTexts[p] ?: emptyList()
-            for (note in notes) {
-                if (note.text.lowercase().contains(q)) {
-                    val noteRect = SearchHighlightRect(
-                        left = (note.x - 0.02f).coerceIn(0f, 1f),
-                        top = (note.y - 0.035f).coerceIn(0f, 1f),
-                        right = (note.x + 0.35f).coerceIn(0f, 1f),
-                        bottom = (note.y + 0.035f).coerceIn(0f, 1f)
-                    )
+            val results = mutableListOf<PdfSearchMatch>()
+
+            for (p in 0 until pageCount) {
+                val pageData = pageContentMap[p] ?: ExtractedPageData("", emptyList())
+                val pageText = pageData.fullText
+                val lowerText = pageText.lowercase()
+
+                // 1. Search extracted document page text
+                var startIndex = 0
+                while (startIndex < lowerText.length) {
+                    val foundIdx = lowerText.indexOf(q, startIndex)
+                    if (foundIdx < 0) break
+
+                    val snippetStart = (foundIdx - 28).coerceAtLeast(0)
+                    val snippetEnd = (foundIdx + q.length + 32).coerceAtMost(pageText.length)
+                    val snippet = pageText.substring(snippetStart, snippetEnd).trim()
+                    val prefix = if (snippetStart > 0) "..." else ""
+                    val suffix = if (snippetEnd < pageText.length) "..." else ""
+
+                    // Compute bounding highlight rects for this match
+                    val matchRects = mutableListOf<SearchHighlightRect>()
+
+                    // Check positioned spans on this page
+                    val matchingSpans = pageData.spans.filter { it.text.lowercase().contains(q) }
+                    for (span in matchingSpans) {
+                        val sLower = span.text.lowercase()
+                        var spanOffset = 0
+                        while (spanOffset < sLower.length) {
+                            val subIdx = sLower.indexOf(q, spanOffset)
+                            if (subIdx < 0) break
+                            val charW = (span.normRight - span.normLeft) / span.text.length.coerceAtLeast(1)
+                            val left = (span.normLeft + subIdx * charW).coerceIn(0f, 1f)
+                            val right = (left + q.length * charW).coerceIn(left + 0.005f, 1f)
+                            matchRects.add(
+                                SearchHighlightRect(
+                                    left = left,
+                                    top = span.normTop,
+                                    right = right,
+                                    bottom = span.normBottom
+                                )
+                            )
+                            spanOffset = subIdx + q.length.coerceAtLeast(1)
+                        }
+                    }
+
+                    // If spans had no direct match, provide smooth proportional highlight based on text position
+                    if (matchRects.isEmpty()) {
+                        val charProgress = (foundIdx.toFloat() / pageText.length.coerceAtLeast(1)).coerceIn(0f, 1f)
+                        val estTop = (0.07f + 0.82f * charProgress).coerceIn(0.05f, 0.92f)
+                        val estBottom = (estTop + 0.026f).coerceIn(0.06f, 0.95f)
+                        matchRects.add(
+                            SearchHighlightRect(
+                                left = 0.07f,
+                                top = estTop,
+                                right = 0.65f,
+                                bottom = estBottom
+                            )
+                        )
+                    }
+
                     results.add(
                         PdfSearchMatch(
                             pageIndex = p,
-                            snippet = "Note: \"${note.text}\"",
+                            snippet = "$prefix$snippet$suffix",
                             matchTerm = query,
-                            source = "Note Annotation",
-                            rects = listOf(noteRect)
+                            source = "Document Text",
+                            rects = matchRects
                         )
                     )
+
+                    startIndex = foundIdx + q.length.coerceAtLeast(1)
+                }
+
+                // 2. Search user text notes & annotations on this page
+                val notes = allPageTexts[p] ?: emptyList()
+                for (note in notes) {
+                    if (note.text.lowercase().contains(q)) {
+                        val noteRect = SearchHighlightRect(
+                            left = (note.x - 0.02f).coerceIn(0f, 1f),
+                            top = (note.y - 0.035f).coerceIn(0f, 1f),
+                            right = (note.x + 0.35f).coerceIn(0f, 1f),
+                            bottom = (note.y + 0.035f).coerceIn(0f, 1f)
+                        )
+                        results.add(
+                            PdfSearchMatch(
+                                pageIndex = p,
+                                snippet = "Note: \"${note.text}\"",
+                                matchTerm = query,
+                                source = "Note Annotation",
+                                rects = listOf(noteRect)
+                            )
+                        )
+                    }
                 }
             }
-        }
 
-        results
+            results
+        } catch (e: Throwable) {
+            e.printStackTrace()
+            emptyList()
+        }
     }
 
     private fun extractTextFromPdf(filePath: String, pageCount: Int): Map<Int, ExtractedPageData> {
-        val bytes = readBytesFromLocation(filePath) ?: return emptyMap()
-
         val textByPage = mutableMapOf<Int, StringBuilder>()
         val spansByPage = mutableMapOf<Int, MutableList<PositionedTextSpan>>()
         for (i in 0 until pageCount) {
@@ -687,6 +809,7 @@ object PdfEngine {
         }
 
         try {
+            val bytes = readBytesFromLocation(filePath) ?: return (0 until pageCount).associateWith { ExtractedPageData("", emptyList()) }
             val textContent = String(bytes, Charsets.ISO_8859_1)
 
             // Extract all streams with their object IDs and stream byte offsets
@@ -789,6 +912,7 @@ object PdfEngine {
             }
         } catch (e: Throwable) {
             e.printStackTrace()
+            System.gc()
         }
 
         return (0 until pageCount).associateWith { p ->

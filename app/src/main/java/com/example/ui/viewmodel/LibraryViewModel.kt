@@ -332,7 +332,13 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
 
             _isCompressing.value = false
             _compressionResult.value = result
-            _userMessage.value = if (result != null) "Compressed: saved ${result.savedPercentage}%" else "Compression failed"
+            _userMessage.value = if (result != null) {
+                if (result.isLarger) {
+                    "Document size increased (+${kotlin.math.abs(result.savedPercentage)}%) due to vector rasterization."
+                } else {
+                    "Compressed: saved ${result.savedPercentage}%"
+                }
+            } else "Compression failed"
         }
     }
 
@@ -379,7 +385,12 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
 
                 _compressingDoc.value = null
                 _compressionResult.value = null
-                _userMessage.value = "Saved to Downloads: ${result.savedPercentage}% smaller (${com.example.ui.components.formatFileSize(result.compressedSizeBytes)})"
+                val savedText = if (result.isLarger) {
+                    "rasterized (${com.example.ui.components.formatFileSize(result.compressedSizeBytes)})"
+                } else {
+                    "${result.savedPercentage}% smaller (${com.example.ui.components.formatFileSize(result.compressedSizeBytes)})"
+                }
+                _userMessage.value = "Saved to Downloads: $savedText"
             } catch (e: Exception) {
                 e.printStackTrace()
                 _userMessage.value = "Failed to export compressed file"

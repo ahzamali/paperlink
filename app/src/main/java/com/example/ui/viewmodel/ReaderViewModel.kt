@@ -586,23 +586,35 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
     private suspend fun executeSearch(q: String) {
         val doc = _uiState.value.document ?: return
         _uiState.update { it.copy(isSearchingInPdf = true) }
-        val matches = PdfEngine.searchInPdf(
-            filePath = doc.filePath,
-            query = q,
-            pageCount = doc.pageCount,
-            allPageTexts = _uiState.value.allPageTexts
-        )
-        _uiState.update {
-            it.copy(
-                pdfSearchResults = matches,
-                currentSearchMatchIndex = 0,
-                isSearchingInPdf = false
+        try {
+            val matches = PdfEngine.searchInPdf(
+                filePath = doc.filePath,
+                query = q,
+                pageCount = doc.pageCount,
+                allPageTexts = _uiState.value.allPageTexts
             )
-        }
-        if (matches.isNotEmpty()) {
-            val first = matches.first()
-            if (first.pageIndex != _uiState.value.currentPageIndex) {
-                updateCurrentVisiblePage(first.pageIndex)
+            _uiState.update {
+                it.copy(
+                    pdfSearchResults = matches,
+                    currentSearchMatchIndex = 0,
+                    isSearchingInPdf = false
+                )
+            }
+            if (matches.isNotEmpty()) {
+                val first = matches.first()
+                if (first.pageIndex != _uiState.value.currentPageIndex) {
+                    updateCurrentVisiblePage(first.pageIndex)
+                }
+            }
+        } catch (e: Throwable) {
+            e.printStackTrace()
+            _uiState.update {
+                it.copy(
+                    pdfSearchResults = emptyList(),
+                    currentSearchMatchIndex = 0,
+                    isSearchingInPdf = false,
+                    userMessage = "Search error or out of memory"
+                )
             }
         }
     }
@@ -687,10 +699,19 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
             )
 
             _uiState.update {
+                val msg = if (result != null) {
+                    if (result.isLarger) {
+                        "Compressed file is larger (+${-result.savedPercentage}%)"
+                    } else {
+                        "Compressed: saved ${result.savedPercentage}%"
+                    }
+                } else {
+                    "Compression failed"
+                }
                 it.copy(
                     isCompressing = false,
                     compressionResult = result,
-                    userMessage = if (result != null) "Compressed: saved ${result.savedPercentage}%" else "Compression failed"
+                    userMessage = msg
                 )
             }
         }
@@ -738,8 +759,13 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
                 ShareHelper.savePdfToDownloads(context, exportFile)
 
                 _uiState.update {
+                    val statusText = if (result.isLarger) {
+                        "Saved to Downloads: ${com.example.ui.components.formatFileSize(result.compressedSizeBytes)} (+${-result.savedPercentage}%)"
+                    } else {
+                        "Saved to Downloads: ${result.savedPercentage}% smaller (${com.example.ui.components.formatFileSize(result.compressedSizeBytes)})"
+                    }
                     it.copy(
-                        userMessage = "Saved to Downloads: ${result.savedPercentage}% smaller (${com.example.ui.components.formatFileSize(result.compressedSizeBytes)})",
+                        userMessage = statusText,
                         showCompressDialog = false
                     )
                 }

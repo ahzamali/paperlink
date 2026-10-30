@@ -240,9 +240,53 @@ class ExampleRobolectricTest {
       assertEquals("Extreme Compression", com.example.data.model.CompressionLevel.HIGH.title)
       assertEquals("Balanced (Recommended)", com.example.data.model.CompressionLevel.BALANCED.title)
       assertEquals("Light Compression", com.example.data.model.CompressionLevel.LIGHT.title)
+
+      // Test isLarger flag
+      val largerResult = com.example.data.model.CompressionResult(
+          originalSizeBytes = 100_000L,
+          compressedSizeBytes = 500_000L,
+          savedPercentage = -400,
+          outputFile = dummyFile
+      )
+      assertTrue(largerResult.isLarger)
+      org.junit.Assert.assertFalse(result.isLarger)
     } finally {
       dummyFile.delete()
     }
+  }
+
+  @Test
+  fun `pdf compression estimation predicts reduction for large scanned document`() {
+    // 5 pages, 15 MB scanned PDF (~3 MB/page)
+    val estimateHigh = com.example.pdf.PdfEngine.estimateCompressedSize(
+        originalSizeBytes = 15_000_000L,
+        pageCount = 5,
+        level = com.example.data.model.CompressionLevel.HIGH
+    )
+    org.junit.Assert.assertFalse(estimateHigh.willLikelyIncrease)
+    assertTrue(estimateHigh.estimatedSizeBytes < 1_000_000L)
+    assertTrue(estimateHigh.estimatedSavingsPercentage > 0) // savings percentage is positive
+
+    val estimateBalanced = com.example.pdf.PdfEngine.estimateCompressedSize(
+        originalSizeBytes = 15_000_000L,
+        pageCount = 5,
+        level = com.example.data.model.CompressionLevel.BALANCED
+    )
+    org.junit.Assert.assertFalse(estimateBalanced.willLikelyIncrease)
+    assertTrue(estimateBalanced.estimatedSizeBytes < 15_000_000L)
+  }
+
+  @Test
+  fun `pdf compression estimation warns for small vector text document`() {
+    // 5 pages, 100 KB text-heavy vector PDF (~20 KB/page)
+    val estimate = com.example.pdf.PdfEngine.estimateCompressedSize(
+        originalSizeBytes = 100_000L,
+        pageCount = 5,
+        level = com.example.data.model.CompressionLevel.BALANCED
+    )
+    assertTrue(estimate.willLikelyIncrease)
+    assertTrue(estimate.estimatedSavingsPercentage < 0) // negative means size increase
+    assertTrue(estimate.estimatedSizeBytes > 100_000L)
   }
 
   @Test
