@@ -74,6 +74,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PanTool
 import androidx.compose.material.icons.filled.Print
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Search
@@ -178,6 +179,7 @@ fun ReaderScreen(
     var showJumpPageDialog by remember { mutableStateOf(false) }
     var showColorPicker by remember { mutableStateOf(false) }
     var showClearConfirm by remember { mutableStateOf(false) }
+    var showSaveToOriginalConfirm by remember { mutableStateOf(false) }
     var showOverflowMenu by remember { mutableStateOf(false) }
 
     // Zoom & Pan state
@@ -356,9 +358,15 @@ fun ReaderScreen(
                             Icon(Icons.Default.Search, contentDescription = "Search in PDF")
                         }
 
-                        // Explicit Save Button
+                        // Save Button (Non-destructive: saves to database library)
                         Button(
-                            onClick = { viewModel.saveEdits(burnToPdfFile = true) },
+                            onClick = {
+                                if (uiState.hasUnsavedChanges) {
+                                    viewModel.saveEdits(burnToPdfFile = false)
+                                } else {
+                                    showSaveToOriginalConfirm = true
+                                }
+                            },
                             modifier = Modifier
                                 .testTag("save_pdf_button")
                                 .padding(end = 4.dp),
@@ -374,10 +382,10 @@ fun ReaderScreen(
                                 modifier = Modifier.size(16.dp)
                             )
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text(if (uiState.hasUnsavedChanges) "Save*" else "Save", fontWeight = FontWeight.Bold)
+                            Text(if (uiState.hasUnsavedChanges) "Save" else "Saved", fontWeight = FontWeight.Bold)
                         }
 
-                        // 3-Dot Overflow Menu for secondary actions (Print, Dark Mode, Compress, Share)
+                        // 3-Dot Overflow Menu for secondary actions (Save to Original, Print, Dark Mode, Compress, Share)
                         Box {
                             IconButton(
                                 onClick = { showOverflowMenu = true },
@@ -393,6 +401,25 @@ fun ReaderScreen(
                                 expanded = showOverflowMenu,
                                 onDismissRequest = { showOverflowMenu = false }
                             ) {
+                                // Save into original PDF file (with confirmation dialog)
+                                DropdownMenuItem(
+                                    text = { Text("Save into Original PDF File...") },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Default.Save,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    },
+                                    onClick = {
+                                        showOverflowMenu = false
+                                        showSaveToOriginalConfirm = true
+                                    },
+                                    modifier = Modifier.testTag("menu_item_save_to_original")
+                                )
+
+                                HorizontalDivider()
+
                                 // Compress PDF
                                 DropdownMenuItem(
                                     text = { Text("Compress PDF") },
@@ -1120,6 +1147,35 @@ fun ReaderScreen(
         )
     }
 
+    // Save Changes to Original PDF Confirmation Dialog
+    if (showSaveToOriginalConfirm) {
+        AlertDialog(
+            onDismissRequest = { showSaveToOriginalConfirm = false },
+            title = { Text("Save Changes to Original PDF?") },
+            text = {
+                val docTitle = uiState.document?.title ?: "Document"
+                Text("This will permanently burn all pen strokes, highlights, and annotations directly into the original PDF file on your device for '$docTitle'.\n\nAre you sure you want to overwrite the original file?")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showSaveToOriginalConfirm = false
+                        viewModel.saveToOriginalPdfConfirmed()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                    modifier = Modifier.testTag("confirm_save_to_original_button")
+                ) {
+                    Text("Save & Overwrite")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSaveToOriginalConfirm = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     // Compress PDF Dialog
     if (uiState.showCompressDialog) {
         CompressPdfDialog(
@@ -1156,8 +1212,14 @@ private fun PdfPageCard(
     onUpdateTextNote: (com.example.data.model.TextAnnotation) -> Unit,
     loadBitmap: suspend () -> Bitmap?
 ) {
-    val pageBitmapState by produceState<Bitmap?>(initialValue = null, key1 = pageIndex) {
-        value = loadBitmap()
+    var retryTrigger by remember { mutableStateOf(0) }
+    var isLoading by remember { mutableStateOf(true) }
+    var pageBitmap by remember { mutableStateOf<Bitmap?>(null) }
+
+    LaunchedEffect(pageIndex, retryTrigger) {
+        isLoading = true
+        pageBitmap = loadBitmap()
+        isLoading = false
     }
 
     Column(
@@ -1259,7 +1321,7 @@ private fun PdfPageCard(
             color = Color.White,
             border = if (isCurrentSearchMatch) androidx.compose.foundation.BorderStroke(2.5.dp, Color(0xFFF59E0B)) else null
         ) {
-            val bitmap = pageBitmapState
+            val bitmap = pageBitmap
             if (bitmap != null) {
                 val aspectRatio = bitmap.width.toFloat() / bitmap.height.toFloat()
                 Box(
@@ -1345,7 +1407,7 @@ private fun PdfPageCard(
                         modifier = Modifier.fillMaxSize()
                     )
                 }
-            } else {
+            } else if (isLoading) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1353,6 +1415,39 @@ private fun PdfPageCard(
                     contentAlignment = Alignment.Center
                 ) {
                     CircularProgressIndicator(modifier = Modifier.size(32.dp), strokeWidth = 2.5.dp)
+                }
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(280.dp)
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                        modifier = Modifier.padding(16.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = "Retry loading page",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clickable { retryTrigger++ }
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Page ${pageIndex + 1} could not be rendered",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        TextButton(onClick = { retryTrigger++ }) {
+                            Text("Tap to Retry")
+                        }
+                    }
                 }
             }
         }

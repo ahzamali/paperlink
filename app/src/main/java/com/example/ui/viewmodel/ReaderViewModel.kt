@@ -33,6 +33,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
 import java.io.FileOutputStream
+import com.example.util.ShareHelper
 
 data class ReaderUiState(
     val document: DocumentEntity? = null,
@@ -368,10 +369,10 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     /**
-     * Explicit save option requested by user:
-     * Saves annotations in database and burns the ink/highlights directly to the PDF file!
+     * Non-destructive save:
+     * Saves annotations in database and updates state without altering the original PDF file unless explicitly requested.
      */
-    fun saveEdits(burnToPdfFile: Boolean = true) {
+    fun saveEdits(burnToPdfFile: Boolean = false) {
         val doc = _uiState.value.document ?: return
         viewModelScope.launch {
             _uiState.update { it.copy(isExporting = true) }
@@ -379,23 +380,27 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
                 val strokes = _uiState.value.allPageStrokes
                 val texts = _uiState.value.allPageTexts
 
-                // 1. Save in local Room Database
+                // 1. Save in local Room Database non-destructively
                 repository.saveAllDocumentAnnotations(doc.id, strokes, texts)
 
-                // 2. Burn into original PDF file if requested
+                // 2. Only burn into original PDF file if explicitly confirmed by user
                 if (burnToPdfFile) {
                     val allPages = (strokes.keys + texts.keys).toSet()
                     val map = mutableMapOf<Int, Pair<List<StrokeAnnotation>, List<TextAnnotation>>>()
                     for (p in allPages) {
                         map[p] = Pair(strokes[p] ?: emptyList(), texts[p] ?: emptyList())
                     }
-                    PdfEngine.saveAnnotatedPdfOverwriting(doc.filePath, map)
+                    val burned = PdfEngine.saveAnnotatedPdfOverwriting(doc.filePath, map)
+                    if (!burned) {
+                        _uiState.update { it.copy(userMessage = "Annotations saved, but could not overwrite original file.") }
+                        return@launch
+                    }
                 }
 
                 _uiState.update {
                     it.copy(
                         hasUnsavedChanges = false,
-                        userMessage = "All edits & pen ink saved to PDF successfully!"
+                        userMessage = if (burnToPdfFile) "Edits permanently saved to original PDF file!" else "Edits saved to library successfully!"
                     )
                 }
             } catch (e: Exception) {
@@ -405,6 +410,13 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
                 _uiState.update { it.copy(isExporting = false) }
             }
         }
+    }
+
+    /**
+     * User explicitly confirmed saving and burning modifications to the original PDF file.
+     */
+    fun saveToOriginalPdfConfirmed() {
+        saveEdits(burnToPdfFile = true)
     }
 
     fun toggleFavorite() {
@@ -419,20 +431,33 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
 
     fun printCurrentDocument(context: Context) {
         val doc = _uiState.value.document ?: return
-        saveEdits(burnToPdfFile = true)
-        val file = File(doc.filePath)
-        if (file.exists()) {
-            PdfPrintAdapter.printPdf(context, file, doc.title)
+        // Non-destructively save annotations to database
+        saveEdits(burnToPdfFile = false)
+        val success = PdfPrintAdapter.printPdf(context, doc.filePath, doc.title, doc.pageCount)
+        if (!success) {
+            _uiState.update { it.copy(userMessage = "Could not initialize print service") }
         }
     }
 
     fun shareAnnotatedPdf(context: Context) {
         val doc = _uiState.value.document ?: return
+        val strokes = _uiState.value.allPageStrokes
+        val texts = _uiState.value.allPageTexts
+        val hasAnnotations = strokes.values.any { it.isNotEmpty() } || texts.values.any { it.isNotEmpty() }
+
+        // If there are no annotations, share the original file directly with zero re-rendering
+        if (!hasAnnotations) {
+            if (doc.filePath.startsWith("content://")) {
+                ShareHelper.sharePdf(context, android.net.Uri.parse(doc.filePath), doc.title, "Share PDF")
+            } else {
+                ShareHelper.sharePdfFile(context, File(doc.filePath), doc.title, "Share PDF")
+            }
+            return
+        }
+
         viewModelScope.launch {
             _uiState.update { it.copy(isExporting = true) }
             try {
-                val strokes = _uiState.value.allPageStrokes
-                val texts = _uiState.value.allPageTexts
                 val allPages = (0 until doc.pageCount).toSet()
                 val map = mutableMapOf<Int, Pair<List<StrokeAnnotation>, List<TextAnnotation>>>()
                 for (p in allPages) {
@@ -442,25 +467,20 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
                 val exportDir = File(context.cacheDir, "exports").apply { if (!exists()) mkdirs() }
                 val exportFile = File(exportDir, "${doc.title.replace(" ", "_")}_annotated.pdf")
 
-                FileOutputStream(exportFile).use { out ->
+                val success = FileOutputStream(exportFile).use { out ->
                     PdfEngine.exportAnnotatedPdf(doc.filePath, out, map)
                 }
 
-                val uri = FileProvider.getUriForFile(
-                    context,
-                    "${context.packageName}.fileprovider",
-                    exportFile
-                )
-
-                val sendIntent = Intent(Intent.ACTION_SEND).apply {
-                    type = "application/pdf"
-                    putExtra(Intent.EXTRA_STREAM, uri)
-                    putExtra(Intent.EXTRA_SUBJECT, "Annotated PDF: ${doc.title}")
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                if (success && exportFile.exists() && exportFile.length() > 0) {
+                    ShareHelper.sharePdfFile(
+                        context = context,
+                        file = exportFile,
+                        title = "Annotated: ${doc.title}",
+                        chooserTitle = "Share Annotated PDF"
+                    )
+                } else {
+                    _uiState.update { it.copy(userMessage = "Failed to export annotated PDF") }
                 }
-                context.startActivity(Intent.createChooser(sendIntent, "Share Annotated PDF").apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                })
             } catch (e: Exception) {
                 e.printStackTrace()
                 _uiState.update { it.copy(userMessage = "Export failed: ${e.message}") }
@@ -488,21 +508,12 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
                         bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
                     }
 
-                    val uri = FileProvider.getUriForFile(
-                        context,
-                        "${context.packageName}.fileprovider",
-                        imageFile
+                    ShareHelper.shareImageFile(
+                        context = context,
+                        file = imageFile,
+                        title = "${doc.title} - Page ${pageIndex + 1}",
+                        chooserTitle = "Share Page Image"
                     )
-
-                    val sendIntent = Intent(Intent.ACTION_SEND).apply {
-                        type = "image/png"
-                        putExtra(Intent.EXTRA_STREAM, uri)
-                        putExtra(Intent.EXTRA_SUBJECT, "${doc.title} - Page ${pageIndex + 1}")
-                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    }
-                    context.startActivity(Intent.createChooser(sendIntent, "Share Page Image").apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    })
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -687,18 +698,12 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
 
     fun shareCompressedPdf(context: Context, result: CompressionResult) {
         try {
-            val uri = FileProvider.getUriForFile(
-                context,
-                "${context.packageName}.fileprovider",
-                result.outputFile
+            ShareHelper.sharePdfFile(
+                context = context,
+                file = result.outputFile,
+                title = "Compressed PDF: ${result.outputFile.name}",
+                chooserTitle = "Share Compressed PDF"
             )
-            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                type = "application/pdf"
-                putExtra(Intent.EXTRA_STREAM, uri)
-                putExtra(Intent.EXTRA_SUBJECT, "Compressed PDF: ${result.outputFile.name}")
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            context.startActivity(Intent.createChooser(shareIntent, "Share Compressed PDF"))
         } catch (e: Exception) {
             e.printStackTrace()
             _uiState.update { it.copy(userMessage = "Could not share compressed file") }
@@ -729,9 +734,12 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
                     )
                 )
 
+                // Also save to device's public Downloads directory
+                ShareHelper.savePdfToDownloads(context, exportFile)
+
                 _uiState.update {
                     it.copy(
-                        userMessage = "Exported: saved ${result.savedPercentage}% (${com.example.ui.components.formatFileSize(result.compressedSizeBytes)})",
+                        userMessage = "Saved to Downloads: ${result.savedPercentage}% smaller (${com.example.ui.components.formatFileSize(result.compressedSizeBytes)})",
                         showCompressDialog = false
                     )
                 }

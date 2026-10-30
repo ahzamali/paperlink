@@ -8,6 +8,7 @@ import com.example.data.local.PaperInkDao
 import com.example.data.model.DocumentEntity
 import com.example.data.model.FolderEntity
 import com.example.data.model.PageAnnotationEntity
+import com.example.pdf.PdfEngine
 import com.example.data.model.StrokeAnnotation
 import com.example.data.model.TextAnnotation
 import kotlinx.coroutines.Dispatchers
@@ -199,9 +200,13 @@ class DocumentRepository(
         try {
             // Persist URI permission so the app can continue reading the mass storage file across restarts
             try {
-                val takeFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                context.contentResolver.takePersistableUriPermission(uri, takeFlags)
-            } catch (_: Exception) {}
+                val readWriteFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                context.contentResolver.takePersistableUriPermission(uri, readWriteFlags)
+            } catch (_: Exception) {
+                try {
+                    context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                } catch (_: Exception) {}
+            }
 
             val uriString = uri.toString()
 
@@ -215,9 +220,16 @@ class DocumentRepository(
             // Determine page count directly from SAF file descriptor without copying
             var pageCount = 1
             try {
-                context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                    android.graphics.pdf.PdfRenderer(pfd).use { renderer ->
-                        pageCount = renderer.pageCount
+                val pfd = context.contentResolver.openFileDescriptor(uri, "r")
+                    ?: PdfEngine.openPfd(uriString, "r")
+                if (pfd != null) {
+                    pfd.use { descriptor ->
+                        val renderer = android.graphics.pdf.PdfRenderer(descriptor)
+                        try {
+                            pageCount = renderer.pageCount
+                        } finally {
+                            renderer.close()
+                        }
                     }
                 }
             } catch (_: Exception) {}

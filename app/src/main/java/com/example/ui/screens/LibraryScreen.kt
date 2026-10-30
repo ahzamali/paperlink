@@ -381,7 +381,7 @@ fun LibraryScreen(
                             onToggleFavorite = { viewModel.toggleFavorite(doc) },
                             onCompress = { viewModel.showCompressDialog(doc) },
                             onPrint = {
-                                PdfPrintAdapter.printPdf(context, File(doc.filePath), doc.title)
+                                PdfPrintAdapter.printPdf(context, doc.filePath, doc.title, doc.pageCount)
                             },
                             onRemove = { removeDocTarget = doc }
                         )

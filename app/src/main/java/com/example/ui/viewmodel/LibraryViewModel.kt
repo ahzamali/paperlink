@@ -9,6 +9,7 @@ import com.example.data.model.DocumentEntity
 import com.example.data.model.PageAnnotationEntity
 import com.example.data.repository.DocumentRepository
 import com.example.pdf.PdfEngine
+import com.example.util.ShareHelper
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -337,20 +338,12 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
 
     fun shareCompressedPdf(context: Context, result: CompressionResult) {
         try {
-            val uri = FileProvider.getUriForFile(
-                context,
-                "${context.packageName}.fileprovider",
-                result.outputFile
+            ShareHelper.sharePdfFile(
+                context = context,
+                file = result.outputFile,
+                title = "Compressed PDF: ${result.outputFile.name}",
+                chooserTitle = "Share Compressed PDF"
             )
-            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                type = "application/pdf"
-                putExtra(Intent.EXTRA_STREAM, uri)
-                putExtra(Intent.EXTRA_SUBJECT, "Compressed PDF: ${result.outputFile.name}")
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            context.startActivity(Intent.createChooser(shareIntent, "Share Compressed PDF").apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            })
         } catch (e: Exception) {
             e.printStackTrace()
             _userMessage.value = "Could not share compressed file"
@@ -381,9 +374,12 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
                     )
                 )
 
+                // Also save to device's public Downloads directory
+                ShareHelper.savePdfToDownloads(context, exportFile)
+
                 _compressingDoc.value = null
                 _compressionResult.value = null
-                _userMessage.value = "Exported: saved ${result.savedPercentage}% (${com.example.ui.components.formatFileSize(result.compressedSizeBytes)})"
+                _userMessage.value = "Saved to Downloads: ${result.savedPercentage}% smaller (${com.example.ui.components.formatFileSize(result.compressedSizeBytes)})"
             } catch (e: Exception) {
                 e.printStackTrace()
                 _userMessage.value = "Failed to export compressed file"

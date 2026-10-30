@@ -25,7 +25,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.InputStream
 import java.io.OutputStream
 import java.util.zip.Inflater
 
@@ -70,22 +72,57 @@ object PdfEngine {
         }
     }
 
+    private fun stageSeekableCopy(location: String): ParcelFileDescriptor? {
+        val ctx = appContext ?: return null
+        return try {
+            val hash = (location.hashCode().toLong() and 0xFFFFFFFFL).toString()
+            val cacheFile = File(ctx.cacheDir, "seekable_$hash.pdf")
+            if (!cacheFile.exists() || cacheFile.length() == 0L) {
+                openInputStreamForLocation(location)?.use { input ->
+                    FileOutputStream(cacheFile).use { output ->
+                        input.copyTo(output)
+                    }
+                }
+            }
+            if (cacheFile.exists() && cacheFile.length() > 0L) {
+                ParcelFileDescriptor.open(cacheFile, ParcelFileDescriptor.MODE_READ_ONLY)
+            } else null
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
     private fun getOrCreateRenderer(filePath: String): PdfRenderer? {
         synchronized(rendererLock) {
             if (cachedRendererPath == filePath && cachedRenderer != null) {
                 return cachedRenderer
             }
             closeRenderer()
-            val pfd = openPfd(filePath, "r") ?: return null
+            val pfd = openPfd(filePath, "r")
+            if (pfd != null) {
+                try {
+                    val renderer = PdfRenderer(pfd)
+                    cachedRendererPath = filePath
+                    cachedRendererPfd = pfd
+                    cachedRenderer = renderer
+                    return renderer
+                } catch (e: Exception) {
+                    try { pfd.close() } catch (_: Exception) {}
+                }
+            }
+
+            // Fallback for non-seekable SAF streams or pipes: stage a seekable copy in cache
+            val fallbackPfd = stageSeekableCopy(filePath) ?: return null
             return try {
-                val renderer = PdfRenderer(pfd)
+                val renderer = PdfRenderer(fallbackPfd)
                 cachedRendererPath = filePath
-                cachedRendererPfd = pfd
+                cachedRendererPfd = fallbackPfd
                 cachedRenderer = renderer
                 renderer
             } catch (e: Exception) {
                 e.printStackTrace()
-                try { pfd.close() } catch (_: Exception) {}
+                try { fallbackPfd.close() } catch (_: Exception) {}
                 null
             }
         }
@@ -117,21 +154,35 @@ object PdfEngine {
         }
     }
 
-    fun readBytesFromLocation(location: String): ByteArray? {
+    fun openInputStreamForLocation(location: String): java.io.InputStream? {
         return try {
             if (location.startsWith("content://")) {
                 val uri = android.net.Uri.parse(location)
-                appContext?.contentResolver?.openInputStream(uri)?.use { stream ->
-                    val available = try { stream.available() } catch (_: Exception) { 0 }
-                    if (available > MAX_FILE_READ_BYTES) return null
-                    stream.readBytes()
-                }
+                appContext?.contentResolver?.openInputStream(uri)
             } else {
                 val file = File(location)
-                if (file.exists()) {
-                    if (file.length() > MAX_FILE_READ_BYTES) return null
-                    file.readBytes()
-                } else null
+                if (file.exists()) java.io.FileInputStream(file) else null
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
+    fun readBytesFromLocation(location: String): ByteArray? {
+        return try {
+            openInputStreamForLocation(location)?.use { stream ->
+                val buffer = ByteArrayOutputStream()
+                val data = ByteArray(16384)
+                var nRead: Int
+                var total = 0
+                val maxLimit = 100 * 1024 * 1024 // 100 MB safe limit
+                while (stream.read(data, 0, data.size).also { nRead = it } != -1) {
+                    total += nRead
+                    if (total > maxLimit) return null
+                    buffer.write(data, 0, nRead)
+                }
+                buffer.toByteArray()
             }
         } catch (e: Throwable) {
             e.printStackTrace()
@@ -167,32 +218,38 @@ object PdfEngine {
             val renderer = getOrCreateRenderer(filePath) ?: return@withContext null
             if (pageIndex < 0 || pageIndex >= renderer.pageCount) return@withContext null
 
+            fun doRender(page: PdfRenderer.Page, w: Int, h: Int, config: Bitmap.Config): Bitmap {
+                val bitmap = Bitmap.createBitmap(w, h, config)
+                val canvas = Canvas(bitmap)
+                canvas.drawColor(Color.WHITE)
+                page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                return bitmap
+            }
+
             try {
                 renderer.openPage(pageIndex).use { page ->
-                    val originalWidth = page.width
-                    val originalHeight = page.height
+                    val originalWidth = if (page.width > 0) page.width else 600
+                    val originalHeight = if (page.height > 0) page.height else 850
                     val scale = targetWidth.toFloat() / originalWidth.toFloat()
-                    val targetHeight = (originalHeight * scale).toInt()
+                    val targetHeight = ((originalHeight * scale).toInt()).coerceIn(100, 4096)
 
-                    val bitmap = Bitmap.createBitmap(
-                        targetWidth,
-                        targetHeight,
-                        Bitmap.Config.ARGB_8888
-                    )
-                    val canvas = Canvas(bitmap)
-                    canvas.drawColor(Color.WHITE)
-
-                    page.render(
-                        bitmap,
-                        null,
-                        null,
-                        PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY
-                    )
+                    val bitmap = try {
+                        doRender(page, targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
+                    } catch (oom: Throwable) {
+                        oom.printStackTrace()
+                        memoryCache.evictAll()
+                        System.gc()
+                        // Fallback with lower resolution and RGB_565 for heavy or image-only scanned PDFs
+                        val fallbackW = (targetWidth * 2 / 3).coerceIn(360, 800)
+                        val fallbackScale = fallbackW.toFloat() / originalWidth.toFloat()
+                        val fallbackH = ((originalHeight * fallbackScale).toInt()).coerceIn(100, 3000)
+                        doRender(page, fallbackW, fallbackH, Bitmap.Config.RGB_565)
+                    }
 
                     memoryCache.put(cacheKey, bitmap)
                     bitmap
                 }
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 e.printStackTrace()
                 null
             }
@@ -204,22 +261,30 @@ object PdfEngine {
         outputStream: OutputStream,
         allAnnotationsByPage: Map<Int, Pair<List<StrokeAnnotation>, List<TextAnnotation>>>
     ): Boolean = withContext(Dispatchers.IO) {
-        val pfd = openPfd(sourceFilePath, "r") ?: return@withContext false
+        // Fast-path: if there are no annotations at all, stream the original file directly without re-rendering!
+        val hasAnyAnnotation = allAnnotationsByPage.values.any { it.first.isNotEmpty() || it.second.isNotEmpty() }
+        if (!hasAnyAnnotation) {
+            val copied = openInputStreamForLocation(sourceFilePath)?.use { input ->
+                input.copyTo(outputStream)
+                true
+            } ?: false
+            if (copied) return@withContext true
+        }
 
-        try {
-            val pdfDoc = PdfDocument()
+        synchronized(rendererLock) {
+            val renderer = getOrCreateRenderer(sourceFilePath) ?: return@withContext false
+            try {
+                val pdfDoc = PdfDocument()
+                val totalPages = renderer.pageCount
+                val targetWidth = 1200
 
-            pfd.use { descriptor ->
-                PdfRenderer(descriptor).use { renderer ->
-                    val totalPages = renderer.pageCount
-                    val targetWidth = 1200
-
-                    for (pageIdx in 0 until totalPages) {
+                for (pageIdx in 0 until totalPages) {
+                    try {
                         renderer.openPage(pageIdx).use { page ->
-                            val origW = page.width
-                            val origH = page.height
+                            val origW = if (page.width > 0) page.width else 600
+                            val origH = if (page.height > 0) page.height else 850
                             val scale = targetWidth.toFloat() / origW.toFloat()
-                            val targetHeight = (origH * scale).toInt()
+                            val targetHeight = ((origH * scale).toInt()).coerceIn(100, 4096)
 
                             val pageInfo = PdfDocument.PageInfo.Builder(
                                 targetWidth,
@@ -255,16 +320,18 @@ object PdfEngine {
 
                             pdfDoc.finishPage(pdfPage)
                         }
+                    } catch (pe: Throwable) {
+                        pe.printStackTrace()
                     }
                 }
-            }
 
-            pdfDoc.writeTo(outputStream)
-            pdfDoc.close()
-            true
-        } catch (e: Exception) {
-            e.printStackTrace()
-            false
+                pdfDoc.writeTo(outputStream)
+                pdfDoc.close()
+                true
+            } catch (e: Throwable) {
+                e.printStackTrace()
+                false
+            }
         }
     }
 
@@ -274,35 +341,45 @@ object PdfEngine {
         level: CompressionLevel,
         allAnnotationsByPage: Map<Int, Pair<List<StrokeAnnotation>, List<TextAnnotation>>> = emptyMap()
     ): CompressionResult? = withContext(Dispatchers.IO) {
-        val pfd = openPfd(sourceLocation, "r") ?: return@withContext null
-
-        try {
-            var originalSize = 0L
-            if (sourceLocation.startsWith("content://")) {
-                val uri = android.net.Uri.parse(sourceLocation)
+        var originalSize = 0L
+        if (sourceLocation.startsWith("content://")) {
+            val uri = android.net.Uri.parse(sourceLocation)
+            try {
                 appContext?.contentResolver?.openFileDescriptor(uri, "r")?.use {
                     originalSize = it.statSize
                 }
-            } else {
-                originalSize = File(sourceLocation).length()
-            }
+            } catch (_: Exception) {}
             if (originalSize <= 0L) {
-                originalSize = (readBytesFromLocation(sourceLocation)?.size ?: 0).toLong()
+                try {
+                    openInputStreamForLocation(sourceLocation)?.use { stream ->
+                        var count = 0L
+                        val buf = ByteArray(32768)
+                        var n: Int
+                        while (stream.read(buf).also { n = it } > 0) {
+                            count += n
+                        }
+                        originalSize = count
+                    }
+                } catch (_: Exception) {}
             }
+        } else {
+            originalSize = File(sourceLocation).length()
+        }
 
-            val pdfDoc = PdfDocument()
+        synchronized(rendererLock) {
+            val renderer = getOrCreateRenderer(sourceLocation) ?: return@withContext null
+            try {
+                val pdfDoc = PdfDocument()
+                val totalPages = renderer.pageCount
+                val targetWidth = level.targetWidth
 
-            pfd.use { descriptor ->
-                PdfRenderer(descriptor).use { renderer ->
-                    val totalPages = renderer.pageCount
-                    val targetWidth = level.targetWidth
-
-                    for (pageIdx in 0 until totalPages) {
+                for (pageIdx in 0 until totalPages) {
+                    try {
                         renderer.openPage(pageIdx).use { page ->
-                            val origW = page.width
-                            val origH = page.height
+                            val origW = if (page.width > 0) page.width else 600
+                            val origH = if (page.height > 0) page.height else 850
                             val scale = targetWidth.toFloat() / origW.toFloat()
-                            val targetHeight = (origH * scale).toInt()
+                            val targetHeight = ((origH * scale).toInt()).coerceIn(100, 4096)
 
                             val fullBitmap = Bitmap.createBitmap(
                                 targetWidth,
@@ -347,29 +424,32 @@ object PdfEngine {
 
                             pdfDoc.finishPage(pdfPage)
                         }
+                    } catch (pe: Throwable) {
+                        pe.printStackTrace()
                     }
                 }
+
+                destFile.parentFile?.apply { if (!exists()) mkdirs() }
+                java.io.FileOutputStream(destFile).use { out ->
+                    pdfDoc.writeTo(out)
+                }
+                pdfDoc.close()
+
+                val compressedSize = destFile.length()
+                val savedPct = if (originalSize > 0) {
+                    (((originalSize - compressedSize).toFloat() / originalSize) * 100).toInt().coerceAtLeast(0)
+                } else 0
+
+                CompressionResult(
+                    originalSizeBytes = originalSize,
+                    compressedSizeBytes = compressedSize,
+                    savedPercentage = savedPct,
+                    outputFile = destFile
+                )
+            } catch (e: Throwable) {
+                e.printStackTrace()
+                null
             }
-
-            java.io.FileOutputStream(destFile).use { out ->
-                pdfDoc.writeTo(out)
-            }
-            pdfDoc.close()
-
-            val compressedSize = destFile.length()
-            val savedPct = if (originalSize > 0) {
-                (((originalSize - compressedSize).toFloat() / originalSize) * 100).toInt().coerceAtLeast(0)
-            } else 0
-
-            CompressionResult(
-                originalSizeBytes = originalSize,
-                compressedSizeBytes = compressedSize,
-                savedPercentage = savedPct,
-                outputFile = destFile
-            )
-        } catch (e: Exception) {
-            e.printStackTrace()
-            null
         }
     }
 
@@ -377,25 +457,9 @@ object PdfEngine {
         filePath: String,
         allAnnotationsByPage: Map<Int, Pair<List<StrokeAnnotation>, List<TextAnnotation>>>
     ): Boolean = withContext(Dispatchers.IO) {
-        if (filePath.startsWith("content://")) {
-            val out = openOutputStreamForLocation(filePath) ?: return@withContext false
-            val success = try {
-                out.use { stream ->
-                    exportAnnotatedPdf(filePath, stream, allAnnotationsByPage)
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-                false
-            }
-            if (success) clearCache()
-            return@withContext success
-        }
-
-        val originalFile = File(filePath)
-        if (!originalFile.exists()) return@withContext false
-
-        val tempFile = File(originalFile.parentFile, "tmp_${System.currentTimeMillis()}.pdf")
-        val success = try {
+        val ctx = appContext ?: return@withContext false
+        val tempFile = File(ctx.cacheDir, "save_overwrite_${System.currentTimeMillis()}.pdf")
+        val exportSuccess = try {
             FileOutputStream(tempFile).use { out ->
                 exportAnnotatedPdf(filePath, out, allAnnotationsByPage)
             }
@@ -404,15 +468,40 @@ object PdfEngine {
             false
         }
 
-        if (success && tempFile.exists() && tempFile.length() > 0) {
-            clearCache()
-            originalFile.delete()
-            tempFile.renameTo(originalFile)
-            true
-        } else {
-            tempFile.delete()
-            false
+        if (!exportSuccess || !tempFile.exists() || tempFile.length() <= 0L) {
+            try { tempFile.delete() } catch (_: Exception) {}
+            return@withContext false
         }
+
+        val writeSuccess = try {
+            if (filePath.startsWith("content://")) {
+                val uri = android.net.Uri.parse(filePath)
+                ctx.contentResolver.openOutputStream(uri, "wt")?.use { destOut ->
+                    FileInputStream(tempFile).use { input ->
+                        input.copyTo(destOut)
+                    }
+                }
+                true
+            } else {
+                val originalFile = File(filePath)
+                FileInputStream(tempFile).use { input ->
+                    FileOutputStream(originalFile).use { destOut ->
+                        input.copyTo(destOut)
+                    }
+                }
+                true
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        } finally {
+            try { tempFile.delete() } catch (_: Exception) {}
+        }
+
+        if (writeSuccess) {
+            clearCache()
+        }
+        writeSuccess
     }
 
     suspend fun exportPageAsPng(

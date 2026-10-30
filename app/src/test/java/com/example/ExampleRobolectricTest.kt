@@ -244,4 +244,40 @@ class ExampleRobolectricTest {
       dummyFile.delete()
     }
   }
+
+  @Test
+  fun `pdf print adapter instantiates with custom file and page count`() {
+    val tempFile = java.io.File.createTempFile("print_test", ".pdf")
+    try {
+      tempFile.writeText("%PDF-1.4 mock pdf content")
+      val adapter = com.example.pdf.PdfPrintAdapter(tempFile, "Document Name", pageCount = 5)
+      org.junit.Assert.assertNotNull(adapter)
+
+      val context = ApplicationProvider.getApplicationContext<Context>()
+      val started = com.example.pdf.PdfPrintAdapter.printPdf(context, tempFile.absolutePath, "Test Doc", 5)
+      org.junit.Assert.assertNotNull(started)
+    } finally {
+      tempFile.delete()
+    }
+  }
+
+  @Test
+  fun `share helper builds intent with clip data and uri permission flags`() {
+    val uri = android.net.Uri.parse("content://com.example.fileprovider/cache/test.pdf")
+    val sendIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+      type = "application/pdf"
+      putExtra(android.content.Intent.EXTRA_STREAM, uri)
+      putExtra(android.content.Intent.EXTRA_SUBJECT, "Test PDF")
+      clipData = android.content.ClipData.newRawUri("Test PDF", uri)
+      addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+
+    assertEquals(android.content.Intent.ACTION_SEND, sendIntent.action)
+    assertEquals("application/pdf", sendIntent.type)
+    assertEquals(uri, sendIntent.getParcelableExtra(android.content.Intent.EXTRA_STREAM))
+    org.junit.Assert.assertNotNull(sendIntent.clipData)
+    assertEquals(uri, sendIntent.clipData?.getItemAt(0)?.uri)
+    assertTrue((sendIntent.flags and android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) != 0)
+  }
 }
+

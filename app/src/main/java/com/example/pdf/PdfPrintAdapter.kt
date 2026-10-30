@@ -12,11 +12,19 @@ import android.print.PrintManager
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.InputStream
 
 class PdfPrintAdapter(
-    private val pdfFile: File,
-    private val documentName: String
+    private val location: String,
+    private val documentName: String,
+    private val pageCount: Int = -1
 ) : PrintDocumentAdapter() {
+
+    constructor(file: File, documentName: String, pageCount: Int = -1) : this(
+        location = file.absolutePath,
+        documentName = documentName,
+        pageCount = pageCount
+    )
 
     override fun onLayout(
         oldAttributes: PrintAttributes?,
@@ -32,10 +40,11 @@ class PdfPrintAdapter(
 
         val pdi = PrintDocumentInfo.Builder(documentName)
             .setContentType(PrintDocumentInfo.CONTENT_TYPE_DOCUMENT)
-            .setPageCount(PrintDocumentInfo.PAGE_COUNT_UNKNOWN)
+            .setPageCount(if (pageCount > 0) pageCount else PrintDocumentInfo.PAGE_COUNT_UNKNOWN)
             .build()
 
-        callback?.onLayoutFinished(pdi, true)
+        val changed = newAttributes != oldAttributes
+        callback?.onLayoutFinished(pdi, changed)
     }
 
     override fun onWrite(
@@ -49,14 +58,27 @@ class PdfPrintAdapter(
             return
         }
 
-        var input: FileInputStream? = null
+        var input: InputStream? = null
         var output: FileOutputStream? = null
 
         try {
-            input = FileInputStream(pdfFile)
+            input = PdfEngine.openInputStreamForLocation(location)
+            if (input == null) {
+                // Fallback attempt directly with File if location is a file path
+                val file = File(location)
+                if (file.exists()) {
+                    input = FileInputStream(file)
+                }
+            }
+
+            if (input == null) {
+                callback?.onWriteFailed("Cannot open document for printing: $location")
+                return
+            }
+
             output = FileOutputStream(destination.fileDescriptor)
 
-            val buf = ByteArray(8192)
+            val buf = ByteArray(16384)
             var bytesRead: Int
             while (input.read(buf).also { bytesRead = it } > 0) {
                 if (cancellationSignal?.isCanceled == true) {
@@ -65,11 +87,12 @@ class PdfPrintAdapter(
                 }
                 output.write(buf, 0, bytesRead)
             }
+            output.flush()
 
             callback?.onWriteFinished(arrayOf(PageRange.ALL_PAGES))
         } catch (e: Exception) {
             e.printStackTrace()
-            callback?.onWriteFailed(e.message)
+            callback?.onWriteFailed(e.message ?: "Print failed")
         } finally {
             try {
                 input?.close()
@@ -79,11 +102,30 @@ class PdfPrintAdapter(
     }
 
     companion object {
-        fun printPdf(context: Context, pdfFile: File, docTitle: String) {
-            val printManager = context.getSystemService(Context.PRINT_SERVICE) as? PrintManager
-            val jobName = "${docTitle}_Print"
-            val adapter = PdfPrintAdapter(pdfFile, docTitle)
-            printManager?.print(jobName, adapter, PrintAttributes.Builder().build())
+        fun printPdf(
+            context: Context,
+            location: String,
+            docTitle: String,
+            pageCount: Int = -1
+        ): Boolean {
+            return try {
+                val printManager = context.getSystemService(Context.PRINT_SERVICE) as? PrintManager
+                if (printManager == null) return false
+                val jobName = "${docTitle.replace(" ", "_")}_Print"
+                val adapter = PdfPrintAdapter(location, docTitle, pageCount)
+                printManager.print(jobName, adapter, PrintAttributes.Builder().build())
+                true
+            } catch (e: Exception) {
+                e.printStackTrace()
+                false
+            }
         }
+
+        fun printPdf(
+            context: Context,
+            file: File,
+            docTitle: String,
+            pageCount: Int = -1
+        ): Boolean = printPdf(context, file.absolutePath, docTitle, pageCount)
     }
 }
