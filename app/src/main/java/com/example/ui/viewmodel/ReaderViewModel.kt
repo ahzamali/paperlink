@@ -24,6 +24,8 @@ import com.example.pdf.PdfPrintAdapter
 import com.example.ui.theme.AnnotationBlack
 import com.example.ui.theme.AnnotationBlue
 import com.example.ui.theme.AnnotationYellow
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -83,9 +85,28 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
     private val _uiState = MutableStateFlow(ReaderUiState())
     val uiState: StateFlow<ReaderUiState> = _uiState.asStateFlow()
 
-    // Undo / Redo history stacks (stores snapshots of allPageStrokes)
+    // Undo / Redo history stacks (stores snapshots of allPageStrokes capped at MAX_STACK_SIZE)
     private val undoStack = mutableListOf<Map<Int, List<StrokeAnnotation>>>()
     private val redoStack = mutableListOf<Map<Int, List<StrokeAnnotation>>>()
+    private var searchJob: Job? = null
+
+    companion object {
+        private const val MAX_STACK_SIZE = 50
+    }
+
+    private fun pushUndo(state: Map<Int, List<StrokeAnnotation>>) {
+        undoStack.add(state)
+        if (undoStack.size > MAX_STACK_SIZE) {
+            undoStack.removeAt(0)
+        }
+    }
+
+    private fun pushRedo(state: Map<Int, List<StrokeAnnotation>>) {
+        redoStack.add(state)
+        if (redoStack.size > MAX_STACK_SIZE) {
+            redoStack.removeAt(0)
+        }
+    }
 
     init {
         PdfEngine.init(application)
@@ -221,7 +242,7 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
 
     fun addStroke(pageIndex: Int, stroke: StrokeAnnotation) {
         val currentAll = _uiState.value.allPageStrokes
-        undoStack.add(currentAll)
+        pushUndo(currentAll)
         redoStack.clear()
 
         val pageList = currentAll[pageIndex] ?: emptyList()
@@ -240,7 +261,7 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
 
     fun deleteStroke(pageIndex: Int, strokeId: Long) {
         val currentAll = _uiState.value.allPageStrokes
-        undoStack.add(currentAll)
+        pushUndo(currentAll)
         redoStack.clear()
 
         val pageList = currentAll[pageIndex] ?: emptyList()
@@ -302,7 +323,7 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
     fun undo() {
         if (undoStack.isNotEmpty()) {
             val previous = undoStack.removeAt(undoStack.lastIndex)
-            redoStack.add(_uiState.value.allPageStrokes)
+            pushRedo(_uiState.value.allPageStrokes)
             _uiState.update {
                 it.copy(
                     allPageStrokes = previous,
@@ -317,7 +338,7 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
     fun redo() {
         if (redoStack.isNotEmpty()) {
             val next = redoStack.removeAt(redoStack.lastIndex)
-            undoStack.add(_uiState.value.allPageStrokes)
+            pushUndo(_uiState.value.allPageStrokes)
             _uiState.update {
                 it.copy(
                     allPageStrokes = next,
@@ -331,7 +352,7 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
 
     fun clearPageAnnotations(pageIndex: Int) {
         val currentAll = _uiState.value.allPageStrokes
-        undoStack.add(currentAll)
+        pushUndo(currentAll)
         val updatedStrokes = currentAll + (pageIndex to emptyList())
         val updatedTexts = _uiState.value.allPageTexts + (pageIndex to emptyList())
 
@@ -515,11 +536,7 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
 
     fun setPdfSearchQuery(query: String) {
         _uiState.update { it.copy(pdfSearchQuery = query) }
-        performSearch(query)
-    }
-
-    fun performSearch(query: String) {
-        val doc = _uiState.value.document ?: return
+        searchJob?.cancel()
         val q = query.trim()
         if (q.isBlank()) {
             _uiState.update {
@@ -531,24 +548,50 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
             }
             return
         }
+        searchJob = viewModelScope.launch {
+            delay(300)
+            executeSearch(q)
+        }
+    }
 
-        viewModelScope.launch {
-            _uiState.update { it.copy(isSearchingInPdf = true) }
-            val matches = PdfEngine.searchInPdf(
-                filePath = doc.filePath,
-                query = q,
-                pageCount = doc.pageCount,
-                allPageTexts = _uiState.value.allPageTexts
-            )
+    fun performSearch(query: String) {
+        searchJob?.cancel()
+        val q = query.trim()
+        if (q.isBlank()) {
             _uiState.update {
                 it.copy(
-                    pdfSearchResults = matches,
+                    pdfSearchResults = emptyList(),
                     currentSearchMatchIndex = 0,
                     isSearchingInPdf = false
                 )
             }
-            if (matches.isNotEmpty()) {
-                updateCurrentVisiblePage(matches[0].pageIndex)
+            return
+        }
+        searchJob = viewModelScope.launch {
+            executeSearch(q)
+        }
+    }
+
+    private suspend fun executeSearch(q: String) {
+        val doc = _uiState.value.document ?: return
+        _uiState.update { it.copy(isSearchingInPdf = true) }
+        val matches = PdfEngine.searchInPdf(
+            filePath = doc.filePath,
+            query = q,
+            pageCount = doc.pageCount,
+            allPageTexts = _uiState.value.allPageTexts
+        )
+        _uiState.update {
+            it.copy(
+                pdfSearchResults = matches,
+                currentSearchMatchIndex = 0,
+                isSearchingInPdf = false
+            )
+        }
+        if (matches.isNotEmpty()) {
+            val first = matches.first()
+            if (first.pageIndex != _uiState.value.currentPageIndex) {
+                updateCurrentVisiblePage(first.pageIndex)
             }
         }
     }

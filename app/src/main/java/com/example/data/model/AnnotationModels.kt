@@ -23,7 +23,7 @@ data class NormalizedPoint(
 )
 
 data class StrokeAnnotation(
-    val id: Long = System.currentTimeMillis() + (0..9999).random(),
+    val id: Long = java.util.UUID.randomUUID().mostSignificantBits and Long.MAX_VALUE,
     val isHighlighter: Boolean = false,
     val colorArgb: Int = Color(0xFFFF5722).toArgb(),
     val strokeWidthDp: Float = 3f,

@@ -24,6 +24,12 @@ abstract class PaperInkDatabase : RoomDatabase() {
         @Volatile
         private var INSTANCE: PaperInkDatabase? = null
 
+        private val MIGRATION_1_2 = object : androidx.room.migration.Migration(1, 2) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                // Version 1 to 2 schema migration
+            }
+        }
+
         fun getDatabase(context: Context): PaperInkDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -31,7 +37,8 @@ abstract class PaperInkDatabase : RoomDatabase() {
                     PaperInkDatabase::class.java,
                     "paper_ink_database"
                 )
-                    .fallbackToDestructiveMigration()
+                    .addMigrations(MIGRATION_1_2)
+                    .fallbackToDestructiveMigrationOnDowngrade()
                     .build()
                 INSTANCE = instance
                 instance

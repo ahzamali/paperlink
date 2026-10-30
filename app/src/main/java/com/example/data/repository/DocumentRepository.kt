@@ -320,17 +320,37 @@ class DocumentRepository(
     ): DocumentEntity? = withContext(Dispatchers.IO) {
         try {
             val cleanUrl = url.trim()
+            require(cleanUrl.startsWith("https://", ignoreCase = true)) {
+                "Only secure HTTPS URLs are allowed"
+            }
+
             val request = Request.Builder().url(cleanUrl).build()
             val response = httpClient.newCall(request).execute()
             if (!response.isSuccessful) return@withContext null
 
             val body = response.body ?: return@withContext null
+            val maxDownloadBytes = 100 * 1024 * 1024L // 100 MB limit
+            if (body.contentLength() > maxDownloadBytes) {
+                return@withContext null
+            }
+
             val docsDir = File(context.filesDir, "documents").apply { if (!exists()) mkdirs() }
             val fileName = "url_${System.currentTimeMillis()}.pdf"
             val destFile = File(docsDir, fileName)
 
+            var totalBytesRead = 0L
             FileOutputStream(destFile).use { out ->
-                body.byteStream().copyTo(out)
+                val buffer = ByteArray(8192)
+                val inStream = body.byteStream()
+                var bytesRead: Int
+                while (inStream.read(buffer).also { bytesRead = it } != -1) {
+                    totalBytesRead += bytesRead
+                    if (totalBytesRead > maxDownloadBytes) {
+                        destFile.delete()
+                        return@withContext null
+                    }
+                    out.write(buffer, 0, bytesRead)
+                }
             }
 
             var pageCount = 1

@@ -44,9 +44,52 @@ object PdfEngine {
 
     fun clearCache() {
         memoryCache.evictAll()
+        closeRenderer()
     }
 
     private var appContext: Context? = null
+    private const val MAX_FILE_READ_BYTES = 35 * 1024 * 1024L // 35 MB memory guard
+
+    // Active renderer session cache to prevent tearing down/rebuilding PdfRenderer on each scrolled page
+    private var cachedRendererPath: String? = null
+    private var cachedRenderer: PdfRenderer? = null
+    private var cachedRendererPfd: ParcelFileDescriptor? = null
+    private val rendererLock = Any()
+
+    fun closeRenderer() {
+        synchronized(rendererLock) {
+            try {
+                cachedRenderer?.close()
+            } catch (_: Exception) {}
+            try {
+                cachedRendererPfd?.close()
+            } catch (_: Exception) {}
+            cachedRenderer = null
+            cachedRendererPfd = null
+            cachedRendererPath = null
+        }
+    }
+
+    private fun getOrCreateRenderer(filePath: String): PdfRenderer? {
+        synchronized(rendererLock) {
+            if (cachedRendererPath == filePath && cachedRenderer != null) {
+                return cachedRenderer
+            }
+            closeRenderer()
+            val pfd = openPfd(filePath, "r") ?: return null
+            return try {
+                val renderer = PdfRenderer(pfd)
+                cachedRendererPath = filePath
+                cachedRendererPfd = pfd
+                cachedRenderer = renderer
+                renderer
+            } catch (e: Exception) {
+                e.printStackTrace()
+                try { pfd.close() } catch (_: Exception) {}
+                null
+            }
+        }
+    }
 
     fun init(context: Context) {
         appContext = context.applicationContext
@@ -78,12 +121,19 @@ object PdfEngine {
         return try {
             if (location.startsWith("content://")) {
                 val uri = android.net.Uri.parse(location)
-                appContext?.contentResolver?.openInputStream(uri)?.use { it.readBytes() }
+                appContext?.contentResolver?.openInputStream(uri)?.use { stream ->
+                    val available = try { stream.available() } catch (_: Exception) { 0 }
+                    if (available > MAX_FILE_READ_BYTES) return null
+                    stream.readBytes()
+                }
             } else {
                 val file = File(location)
-                if (file.exists()) file.readBytes() else null
+                if (file.exists()) {
+                    if (file.length() > MAX_FILE_READ_BYTES) return null
+                    file.readBytes()
+                } else null
             }
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             e.printStackTrace()
             null
         }
@@ -111,42 +161,41 @@ object PdfEngine {
         val cacheKey = "${filePath}_${pageIndex}_$targetWidth"
         memoryCache.get(cacheKey)?.let { return@withContext it }
 
-        val pfd = openPfd(filePath, "r") ?: return@withContext null
+        synchronized(rendererLock) {
+            memoryCache.get(cacheKey)?.let { return@withContext it }
 
-        try {
-            pfd.use { descriptor ->
-                PdfRenderer(descriptor).use { renderer ->
-                    if (pageIndex < 0 || pageIndex >= renderer.pageCount) return@withContext null
+            val renderer = getOrCreateRenderer(filePath) ?: return@withContext null
+            if (pageIndex < 0 || pageIndex >= renderer.pageCount) return@withContext null
 
-                    renderer.openPage(pageIndex).use { page ->
-                        val originalWidth = page.width
-                        val originalHeight = page.height
-                        val scale = targetWidth.toFloat() / originalWidth.toFloat()
-                        val targetHeight = (originalHeight * scale).toInt()
+            try {
+                renderer.openPage(pageIndex).use { page ->
+                    val originalWidth = page.width
+                    val originalHeight = page.height
+                    val scale = targetWidth.toFloat() / originalWidth.toFloat()
+                    val targetHeight = (originalHeight * scale).toInt()
 
-                        val bitmap = Bitmap.createBitmap(
-                            targetWidth,
-                            targetHeight,
-                            Bitmap.Config.ARGB_8888
-                        )
-                        val canvas = Canvas(bitmap)
-                        canvas.drawColor(Color.WHITE)
+                    val bitmap = Bitmap.createBitmap(
+                        targetWidth,
+                        targetHeight,
+                        Bitmap.Config.ARGB_8888
+                    )
+                    val canvas = Canvas(bitmap)
+                    canvas.drawColor(Color.WHITE)
 
-                        page.render(
-                            bitmap,
-                            null,
-                            null,
-                            PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY
-                        )
+                    page.render(
+                        bitmap,
+                        null,
+                        null,
+                        PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY
+                    )
 
-                        memoryCache.put(cacheKey, bitmap)
-                        bitmap
-                    }
+                    memoryCache.put(cacheKey, bitmap)
+                    bitmap
                 }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                null
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
-            null
         }
     }
 
@@ -649,7 +698,7 @@ object PdfEngine {
                     }
                 }
             }
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             e.printStackTrace()
         }
 

@@ -355,11 +355,34 @@ private fun eraseAt(
     val normY = pos.y / height
     val threshold = 28f / width // approx 28px hit radius
 
-    // Check strokes
+    val thresholdSq = threshold * threshold
+
+    // Check strokes with bounding-box pre-filtering
     for (stroke in strokes) {
-        for (pt in stroke.points) {
-            val dist = hypot(pt.x - normX, pt.y - normY)
-            if (dist < threshold) {
+        val pts = stroke.points
+        if (pts.isEmpty()) continue
+
+        var minX = Float.MAX_VALUE
+        var maxX = -Float.MAX_VALUE
+        var minY = Float.MAX_VALUE
+        var maxY = -Float.MAX_VALUE
+        for (pt in pts) {
+            if (pt.x < minX) minX = pt.x
+            if (pt.x > maxX) maxX = pt.x
+            if (pt.y < minY) minY = pt.y
+            if (pt.y > maxY) maxY = pt.y
+        }
+
+        // Quick rejection if touch point is outside stroke bounding box expanded by hit radius
+        if (normX < minX - threshold || normX > maxX + threshold ||
+            normY < minY - threshold || normY > maxY + threshold) {
+            continue
+        }
+
+        for (pt in pts) {
+            val dx = pt.x - normX
+            val dy = pt.y - normY
+            if (dx * dx + dy * dy < thresholdSq) {
                 onDeleteStroke(stroke.id)
                 return
             }
@@ -367,9 +390,12 @@ private fun eraseAt(
     }
 
     // Check notes
+    val noteThreshold = threshold * 2
+    val noteThresholdSq = noteThreshold * noteThreshold
     for (note in textNotes) {
-        val dist = hypot(note.x - normX, note.y - normY)
-        if (dist < threshold * 2) {
+        val dx = note.x - normX
+        val dy = note.y - normY
+        if (dx * dx + dy * dy < noteThresholdSq) {
             onDeleteTextNote(note.id)
             return
         }
