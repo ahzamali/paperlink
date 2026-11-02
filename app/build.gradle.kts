@@ -111,7 +111,10 @@ dependencies {
   implementation(libs.androidx.room.ktx)
   implementation(libs.androidx.room.runtime)
   // implementation(libs.coil.compose)
-  implementation(libs.converter.moshi)
+  // Firebase BoM and Analytics
+  implementation(platform(libs.firebase.bom))
+  implementation(libs.firebase.analytics)
+
   // Commented out unused Firebase services to prevent unintended network background calls:
   // implementation(libs.firebase.ai)
   // Uncomment to use Firestore:

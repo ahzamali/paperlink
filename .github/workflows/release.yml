@@ -60,9 +60,9 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: PaperInk PDF ${{ github.ref_name }}
+          name: PaperInk PDF ${{ github.ref_name }} (Beta)
           draft: false
-          prerelease: false
+          prerelease: true
           generate_release_notes: true
           files: |
             app/build/outputs/apk/debug/paperink-pdf-${{ github.ref_name }}.apk

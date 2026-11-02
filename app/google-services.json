@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "605487007327",
+    "project_id": "gen-lang-client-0771611631",
+    "storage_bucket": "gen-lang-client-0771611631.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:605487007327:android:d66b4e8f27fe9c9f8f7dea",
+        "android_client_info": {
+          "package_name": "com.aistudio.paperink.pdfapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDM614A4fYlCDWBNFUlBpaNt-gjQ5aag54"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:605487007327:android:d66b4e8f27fe9c9f8f7dea",
+        "android_client_info": {
+          "package_name": "com.example"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDM614A4fYlCDWBNFUlBpaNt-gjQ5aag54"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
