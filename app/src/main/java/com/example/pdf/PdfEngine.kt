@@ -12,6 +12,8 @@ import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
 import android.graphics.pdf.PdfRenderer
+import android.graphics.pdf.LoadParams
+import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.util.LruCache
 import com.example.data.model.CompressionEstimate
@@ -70,6 +72,203 @@ object PdfEngine {
             cachedRenderer = null
             cachedRendererPfd = null
             cachedRendererPath = null
+        }
+    }
+    enum class PdfProtectionStatus {
+        NOT_PROTECTED,
+        PASSWORD_REQUIRED,
+        CANNOT_OPEN
+    }
+
+    sealed class OpenPasswordResult {
+        data class Success(val pageCount: Int, val unlockedFilePath: String? = null) : OpenPasswordResult()
+        object IncorrectPassword : OpenPasswordResult()
+        data class Error(val message: String) : OpenPasswordResult()
+    }
+
+    /**
+     * Inspects PDF bytes for /Encrypt dictionary or attempts initial open to detect password protection.
+     */
+    fun checkPdfProtection(filePath: String): PdfProtectionStatus {
+        synchronized(rendererLock) {
+            if (cachedRendererPath == filePath && cachedRenderer != null) {
+                return PdfProtectionStatus.NOT_PROTECTED
+            }
+        }
+        val pfd = openPfd(filePath, "r") ?: stageSeekableCopy(filePath)
+            ?: return PdfProtectionStatus.CANNOT_OPEN
+        return try {
+            val renderer = PdfRenderer(pfd)
+            renderer.close()
+            try { pfd.close() } catch (_: Exception) {}
+            PdfProtectionStatus.NOT_PROTECTED
+        } catch (e: SecurityException) {
+            try { pfd.close() } catch (_: Exception) {}
+            PdfProtectionStatus.PASSWORD_REQUIRED
+        } catch (e: Exception) {
+            try { pfd.close() } catch (_: Exception) {}
+            val msg = (e.message ?: "") + " " + (e.cause?.message ?: "")
+            if (msg.contains("password", ignoreCase = true) || msg.contains("security", ignoreCase = true)) {
+                PdfProtectionStatus.PASSWORD_REQUIRED
+            } else if (hasEncryptDictionary(filePath)) {
+                PdfProtectionStatus.PASSWORD_REQUIRED
+            } else {
+                PdfProtectionStatus.CANNOT_OPEN
+            }
+        }
+    }
+
+    /**
+     * Scans the PDF header/trailer bytes for standard /Encrypt dictionary.
+     */
+    fun hasEncryptDictionary(filePath: String): Boolean {
+        return try {
+            val inStream = openInputStreamForLocation(filePath) ?: return false
+            val buffer = ByteArray(16384)
+            val bytesRead = inStream.read(buffer)
+            inStream.close()
+            if (bytesRead <= 0) return false
+            val text = String(buffer, 0, bytesRead, Charsets.ISO_8859_1)
+            text.contains("/Encrypt")
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Unlocks a password-protected PDF.
+     * Decrypts the document using the provided password and writes an unencrypted
+     * copy to app cache, immediately discarding the password from memory.
+     */
+    fun openWithPassword(filePath: String, password: String): OpenPasswordResult {
+        synchronized(rendererLock) {
+            closeRenderer()
+            val pfd = openPfd(filePath, "r") ?: stageSeekableCopy(filePath)
+                ?: return OpenPasswordResult.Error("Cannot open file")
+
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+                    val params = LoadParams.Builder().setPassword(password).build()
+                    val renderer = PdfRenderer(pfd, params)
+                    val pages = renderer.pageCount
+
+                    var unlockedPath: String? = null
+                    try {
+                        val app = appContext
+                        if (app != null) {
+                            val unlockedDir = File(app.cacheDir, "unlocked_pdfs").apply { if (!exists()) mkdirs() }
+                            val unlockedFile = File(unlockedDir, "unlocked_${System.currentTimeMillis()}_${(100..999).random()}.pdf")
+                            val outPfd = ParcelFileDescriptor.open(
+                                unlockedFile,
+                                ParcelFileDescriptor.MODE_READ_WRITE or ParcelFileDescriptor.MODE_CREATE
+                            )
+                            outPfd.use { outDescriptor ->
+                                renderer.write(outDescriptor, true)
+                            }
+                            if (unlockedFile.exists() && unlockedFile.length() > 0) {
+                                unlockedPath = unlockedFile.absolutePath
+                            }
+                        }
+                    } catch (wEx: Exception) {
+                        wEx.printStackTrace()
+                    }
+
+                    if (unlockedPath != null) {
+                        renderer.close()
+                        try { pfd.close() } catch (_: Exception) {}
+
+                        val unlockedPfd = openPfd(unlockedPath, "r")
+                        if (unlockedPfd != null) {
+                            val unlockedRenderer = PdfRenderer(unlockedPfd)
+                            cachedRenderer = unlockedRenderer
+                            cachedRendererPath = unlockedPath
+                            cachedRendererPfd = unlockedPfd
+                        }
+                        return OpenPasswordResult.Success(pages, unlockedFilePath = unlockedPath)
+                    } else {
+                        // Fallback: keep renderer open in memory without writing; password is still discarded
+                        cachedRenderer = renderer
+                        cachedRendererPath = filePath
+                        cachedRendererPfd = pfd
+                        return OpenPasswordResult.Success(pages, unlockedFilePath = null)
+                    }
+                } else {
+                    // Reflection fallback for devices supporting PdfRendererPreV
+                    try {
+                        val preVClass = Class.forName("android.graphics.pdf.PdfRendererPreV")
+                        val loadParamsClass = Class.forName("android.graphics.pdf.LoadParams")
+                        val builderClass = Class.forName("android.graphics.pdf.LoadParams\$Builder")
+                        val builder = builderClass.getConstructor().newInstance()
+                        val setPasswordMethod = builderClass.getMethod("setPassword", String::class.java)
+                        setPasswordMethod.invoke(builder, password)
+                        val buildMethod = builderClass.getMethod("build")
+                        val loadParams = buildMethod.invoke(builder)
+
+                        val preVConstructor = preVClass.getConstructor(ParcelFileDescriptor::class.java, loadParamsClass)
+                        val preVRenderer = preVConstructor.newInstance(pfd, loadParams) as AutoCloseable
+                        val getPageCountMethod = preVClass.getMethod("getPageCount")
+                        val pages = getPageCountMethod.invoke(preVRenderer) as Int
+
+                        var unlockedPath: String? = null
+                        try {
+                            val app = appContext
+                            if (app != null) {
+                                val unlockedDir = File(app.cacheDir, "unlocked_pdfs").apply { if (!exists()) mkdirs() }
+                                val unlockedFile = File(unlockedDir, "unlocked_${System.currentTimeMillis()}_${(100..999).random()}.pdf")
+                                val outPfd = ParcelFileDescriptor.open(
+                                    unlockedFile,
+                                    ParcelFileDescriptor.MODE_READ_WRITE or ParcelFileDescriptor.MODE_CREATE
+                                )
+                                outPfd.use { outDescriptor ->
+                                    val writeMethod = preVClass.getMethod("write", ParcelFileDescriptor::class.java, Boolean::class.javaPrimitiveType)
+                                    writeMethod.invoke(preVRenderer, outDescriptor, true)
+                                }
+                                if (unlockedFile.exists() && unlockedFile.length() > 0) {
+                                    unlockedPath = unlockedFile.absolutePath
+                                }
+                            }
+                        } catch (wEx: Exception) {
+                            wEx.printStackTrace()
+                        }
+
+                        preVRenderer.close()
+                        try { pfd.close() } catch (_: Exception) {}
+
+                        if (unlockedPath != null) {
+                            val unlockedPfd = openPfd(unlockedPath, "r")
+                            if (unlockedPfd != null) {
+                                val unlockedRenderer = PdfRenderer(unlockedPfd)
+                                cachedRenderer = unlockedRenderer
+                                cachedRendererPath = unlockedPath
+                                cachedRendererPfd = unlockedPfd
+                            }
+                            return OpenPasswordResult.Success(pages, unlockedFilePath = unlockedPath)
+                        } else {
+                            return OpenPasswordResult.Success(pages, unlockedFilePath = null)
+                        }
+                    } catch (e: Exception) {
+                        val cause = e.cause
+                        if (cause is SecurityException || e is SecurityException) {
+                            return OpenPasswordResult.IncorrectPassword
+                        }
+                        val msg = (e.message ?: "") + " " + (cause?.message ?: "")
+                        if (msg.contains("password", ignoreCase = true) || msg.contains("security", ignoreCase = true)) {
+                            return OpenPasswordResult.IncorrectPassword
+                        }
+                        return OpenPasswordResult.Error("Opening password-protected PDFs requires Android 15+")
+                    }
+                }
+            } catch (e: SecurityException) {
+                try { pfd.close() } catch (_: Exception) {}
+                return OpenPasswordResult.IncorrectPassword
+            } catch (e: Exception) {
+                try { pfd.close() } catch (_: Exception) {}
+                val msg = (e.message ?: "") + " " + (e.cause?.message ?: "")
+                if (msg.contains("password", ignoreCase = true) || msg.contains("security", ignoreCase = true) || msg.contains("incorrect", ignoreCase = true)) {
+                    return OpenPasswordResult.IncorrectPassword
+                }
+                return OpenPasswordResult.Error(e.message ?: "Failed to unlock document")
+            }
         }
     }
 

@@ -24,10 +24,13 @@ import com.example.pdf.PdfPrintAdapter
 import com.example.ui.theme.AnnotationBlack
 import com.example.ui.theme.AnnotationBlue
 import com.example.ui.theme.AnnotationYellow
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -62,7 +65,10 @@ data class ReaderUiState(
     // Compression
     val isCompressing: Boolean = false,
     val compressionResult: CompressionResult? = null,
-    val showCompressDialog: Boolean = false
+    val showCompressDialog: Boolean = false,
+    // Password protection
+    val isPasswordRequired: Boolean = false,
+    val passwordErrorMessage: String? = null
 ) {
     val activeColor: Color
         get() = if (activeTool == ToolType.HIGHLIGHTER) highlighterColor else penColor
@@ -127,6 +133,23 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
                 )
             }
 
+            // Check if password protected
+            val isProtected = withContext(Dispatchers.IO) {
+                doc.tags.contains("Protected") ||
+                    PdfEngine.checkPdfProtection(doc.filePath) == PdfEngine.PdfProtectionStatus.PASSWORD_REQUIRED
+            }
+
+            if (isProtected) {
+                _uiState.update {
+                    it.copy(
+                        isPasswordRequired = true,
+                        passwordErrorMessage = null,
+                        isPageLoading = false
+                    )
+                }
+                return@launch
+            }
+
             // Load all annotations for this document across all pages
             val allEntities = repository.getAllAnnotationsForDocument(doc.id)
             val strokeMap = mutableMapOf<Int, MutableList<StrokeAnnotation>>()
@@ -171,6 +194,63 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
                     canUndo = false,
                     canRedo = false
                 )
+            }
+        }
+    }
+
+    /**
+     * Unlocks document with user password, decrypts session or writes unlocked copy,
+     * and discards the password immediately from memory.
+     */
+    fun unlockDocumentWithPassword(password: String) {
+        val doc = _uiState.value.document ?: return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isPageLoading = true, passwordErrorMessage = null) }
+            val result = withContext(Dispatchers.IO) {
+                PdfEngine.openWithPassword(doc.filePath, password)
+            }
+            // Discard password immediately:
+            // Notice: 'password' is not stored or assigned to any property or state.
+            when (result) {
+                is PdfEngine.OpenPasswordResult.Success -> {
+                    val newPath = result.unlockedFilePath ?: doc.filePath
+                    val cleanTags = doc.tags.replace("Protected", "").trim().trim(',').trim()
+                    val updatedDoc = doc.copy(
+                        filePath = newPath,
+                        pageCount = result.pageCount,
+                        tags = cleanTags
+                    )
+                    _uiState.update {
+                        it.copy(
+                            document = updatedDoc,
+                            totalPages = result.pageCount.coerceAtLeast(1),
+                            isPasswordRequired = false,
+                            passwordErrorMessage = null,
+                            isPageLoading = false,
+                            userMessage = "Document unlocked"
+                        )
+                    }
+                    repository.updateDocument(updatedDoc)
+                    getPageBitmap(0)
+                }
+                is PdfEngine.OpenPasswordResult.IncorrectPassword -> {
+                    _uiState.update {
+                        it.copy(
+                            isPasswordRequired = true,
+                            passwordErrorMessage = "Incorrect password. Please try again.",
+                            isPageLoading = false
+                        )
+                    }
+                }
+                is PdfEngine.OpenPasswordResult.Error -> {
+                    _uiState.update {
+                        it.copy(
+                            isPasswordRequired = true,
+                            passwordErrorMessage = result.message,
+                            isPageLoading = false
+                        )
+                    }
+                }
             }
         }
     }

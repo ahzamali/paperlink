@@ -21,6 +21,9 @@ import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.ui.graphics.graphicsLayer
 import com.example.ui.components.CompressPdfDialog
+import com.example.ui.components.PasswordPromptDialog
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -812,7 +815,42 @@ fun ReaderScreen(
                 .background(pageBackground),
             contentAlignment = Alignment.Center
         ) {
-            if (uiState.isPageLoading && uiState.document == null) {
+            if (uiState.isPasswordRequired) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                    modifier = Modifier.padding(24.dp)
+                ) {
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
+                        modifier = Modifier.size(72.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.Lock,
+                                contentDescription = "Password Protected",
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(36.dp)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "This document is password protected",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Enter the password to view and annotate this PDF.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            } else if (uiState.isPageLoading && uiState.document == null) {
                 CircularProgressIndicator()
             } else {
                 // Continuous Vertical Scrolling List of Pages with Pinch-to-zoom & Pan
@@ -1188,6 +1226,18 @@ fun ReaderScreen(
             onCompress = { level -> viewModel.compressDocument(level) },
             onShareResult = { result -> viewModel.shareCompressedPdf(context, result) },
             onExportSave = { result -> viewModel.exportCompressedPdf(result) }
+        )
+    }
+
+    // Password Prompt Dialog
+    if (uiState.isPasswordRequired) {
+        PasswordPromptDialog(
+            docTitle = uiState.document?.title ?: "Protected PDF",
+            errorMessage = uiState.passwordErrorMessage,
+            onDismiss = onBack,
+            onUnlock = { password ->
+                viewModel.unlockDocumentWithPassword(password)
+            }
         )
     }
 }

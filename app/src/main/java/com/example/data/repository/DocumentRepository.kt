@@ -102,6 +102,10 @@ class DocumentRepository(
         dao.moveToFolder(docId, folderId)
     }
 
+    suspend fun updateDocument(document: DocumentEntity) = withContext(Dispatchers.IO) {
+        dao.updateDocument(document)
+    }
+
     suspend fun deleteDocument(doc: DocumentEntity) = withContext(Dispatchers.IO) {
         try {
             val file = File(doc.filePath)
@@ -219,6 +223,7 @@ class DocumentRepository(
 
             // Determine page count directly from SAF file descriptor without copying
             var pageCount = 1
+            var isProtected = false
             try {
                 val pfd = context.contentResolver.openFileDescriptor(uri, "r")
                     ?: PdfEngine.openPfd(uriString, "r")
@@ -232,7 +237,13 @@ class DocumentRepository(
                         }
                     }
                 }
-            } catch (_: Exception) {}
+            } catch (e: SecurityException) {
+                isProtected = true
+            } catch (_: Exception) {
+                if (PdfEngine.hasEncryptDictionary(uriString)) {
+                    isProtected = true
+                }
+            }
 
             // Extract display name and file size directly from storage provider
             var title = "PDF Document"
@@ -268,7 +279,7 @@ class DocumentRepository(
                 fileSizeBytes = fileSizeBytes,
                 currentPage = 0,
                 isFavorite = false,
-                tags = "Mass Storage"
+                tags = if (isProtected) "Protected, Mass Storage" else "Mass Storage"
             )
             val newId = dao.insertDocument(entity)
             entity.copy(id = newId)

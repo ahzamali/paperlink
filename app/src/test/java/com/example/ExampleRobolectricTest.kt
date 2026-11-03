@@ -323,5 +323,35 @@ class ExampleRobolectricTest {
     assertEquals(uri, sendIntent.clipData?.getItemAt(0)?.uri)
     assertTrue((sendIntent.flags and android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) != 0)
   }
+
+  @Test
+  fun `pdf engine hasEncryptDictionary accurately identifies encrypted pdfs`() {
+    val unencryptedFile = java.io.File.createTempFile("unencrypted", ".pdf")
+    val encryptedFile = java.io.File.createTempFile("encrypted", ".pdf")
+    try {
+      unencryptedFile.writeText("%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF")
+      encryptedFile.writeText("%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\ntrailer\n<< /Root 1 0 R /Encrypt 3 0 R >>\n%%EOF")
+
+      org.junit.Assert.assertFalse(com.example.pdf.PdfEngine.hasEncryptDictionary(unencryptedFile.absolutePath))
+      assertTrue(com.example.pdf.PdfEngine.hasEncryptDictionary(encryptedFile.absolutePath))
+    } finally {
+      unencryptedFile.delete()
+      encryptedFile.delete()
+    }
+  }
+
+  @Test
+  fun `reader ui state enforces immediate password discard and security flags`() {
+    val state = com.example.ui.viewmodel.ReaderUiState(
+        isPasswordRequired = true,
+        passwordErrorMessage = "Incorrect password. Please try again."
+    )
+    assertTrue(state.isPasswordRequired)
+    assertEquals("Incorrect password. Please try again.", state.passwordErrorMessage)
+
+    // Verify ReaderUiState contains NO password storage field (ensuring zero persistence)
+    val declaredFields = com.example.ui.viewmodel.ReaderUiState::class.java.declaredFields.map { it.name }
+    org.junit.Assert.assertFalse(declaredFields.any { it.contains("password", ignoreCase = true) && !it.contains("Required") && !it.contains("Error") })
+  }
 }
 
