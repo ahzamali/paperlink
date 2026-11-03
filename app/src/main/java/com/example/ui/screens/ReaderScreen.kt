@@ -862,8 +862,10 @@ fun ReaderScreen(
                         .graphicsLayer {
                             scaleX = zoomScale
                             scaleY = zoomScale
-                            translationX = panOffsetX
-                            translationY = panOffsetY
+                            val maxPanX = if (zoomScale > 1f) (zoomScale - 1f) * size.width / 2f else 0f
+                            val maxPanY = if (zoomScale > 1f) (zoomScale - 1f) * size.height / 2f else 0f
+                            translationX = panOffsetX.coerceIn(-maxPanX, maxPanX)
+                            translationY = panOffsetY.coerceIn(-maxPanY, maxPanY)
                         }
                         .pointerInput(uiState.activeTool) {
                             if (uiState.activeTool == ToolType.READ) {
@@ -878,22 +880,38 @@ fun ReaderScreen(
                                             val newScale = (zoomScale * zoom).coerceIn(1f, 5f)
                                             zoomScale = newScale
                                             if (newScale > 1f) {
+                                                // Scroll speed proportional to zoomed size
+                                                val scaledPanX = pan.x * newScale
+                                                val scaledPanY = pan.y * newScale
                                                 val maxPanX = (newScale - 1f) * size.width / 2f
                                                 val maxPanY = (newScale - 1f) * size.height / 2f
-                                                panOffsetX = (panOffsetX + pan.x).coerceIn(-maxPanX, maxPanX)
-                                                panOffsetY = (panOffsetY + pan.y).coerceIn(-maxPanY, maxPanY)
+                                                panOffsetX = (panOffsetX + scaledPanX).coerceIn(-maxPanX, maxPanX)
+                                                panOffsetY = (panOffsetY + scaledPanY).coerceIn(-maxPanY, maxPanY)
                                             } else {
                                                 panOffsetX = 0f
                                                 panOffsetY = 0f
                                             }
                                             event.changes.forEach { it.consume() }
                                         } else if (downPointers.size == 1 && zoomScale > 1.05f) {
-                                            // 1-finger pan when zoomed in
+                                            // 1-finger pan when zoomed in - scroll speed proportional to zoomed in size
                                             val pan = event.calculatePan()
+                                            val scrollMultiplier = zoomScale
+                                            val scaledPanX = pan.x * scrollMultiplier
+                                            val scaledPanY = pan.y * scrollMultiplier
                                             val maxPanX = (zoomScale - 1f) * size.width / 2f
                                             val maxPanY = (zoomScale - 1f) * size.height / 2f
-                                            panOffsetX = (panOffsetX + pan.x).coerceIn(-maxPanX, maxPanX)
-                                            panOffsetY = (panOffsetY + pan.y).coerceIn(-maxPanY, maxPanY)
+
+                                            panOffsetX = (panOffsetX + scaledPanX).coerceIn(-maxPanX, maxPanX)
+
+                                            val desiredPanY = panOffsetY + scaledPanY
+                                            val clampedPanY = desiredPanY.coerceIn(-maxPanY, maxPanY)
+                                            val excessY = desiredPanY - clampedPanY
+                                            panOffsetY = clampedPanY
+
+                                            if (excessY != 0f) {
+                                                // Dispatch boundary vertical scroll to LazyColumn so adjacent pages continue scrolling
+                                                verticalLazyListState.dispatchRawDelta(excessY)
+                                            }
                                             event.changes.forEach { it.consume() }
                                         }
                                     } while (event.changes.any { it.pressed })
