@@ -17,3 +17,11 @@ local.properties
 .env
 debug.keystore
 .build-outputs/
+
+# Firebase configuration — contains API keys; never commit the real file
+# Copy google-services.example.json -> google-services.json and fill in your project values
+app/google-services.json
+
+# Release keystore files
+*.jks
+my-upload-key.jks
