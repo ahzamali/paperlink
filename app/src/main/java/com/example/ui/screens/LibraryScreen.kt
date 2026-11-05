@@ -29,9 +29,11 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.automirrored.filled.TrendingDown
 import androidx.compose.material.icons.filled.CallMerge
+import androidx.compose.material.icons.filled.Coffee
 import com.example.ui.components.CompressPdfDialog
 import com.example.ui.components.MergePdfDialog
 import com.example.ui.components.MergeableItem
+import com.example.ui.components.SupportDevelopmentDialog
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
@@ -115,6 +117,7 @@ fun LibraryScreen(
     val snackbarHostState = remember { SnackbarHostState() }
 
     var showOpenUrlDialog by remember { mutableStateOf(false) }
+    var showSupportDialog by remember { mutableStateOf(false) }
     var removeDocTarget by remember { mutableStateOf<DocumentEntity?>(null) }
     var showSortMenu by remember { mutableStateOf(false) }
     var isSearchExpanded by remember { mutableStateOf(false) }
@@ -234,6 +237,18 @@ fun LibraryScreen(
                         modifier = Modifier.testTag("open_url_button")
                     ) {
                         Icon(Icons.Default.Language, contentDescription = "Open PDF from Web URL")
+                    }
+
+                    // Support Development / Buy Me a Coffee button
+                    IconButton(
+                        onClick = { showSupportDialog = true },
+                        modifier = Modifier.testTag("support_development_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Coffee,
+                            contentDescription = "Support Development",
+                            tint = Color(0xFFD97706)
+                        )
                     }
 
                     // Sort menu
@@ -452,6 +467,13 @@ fun LibraryScreen(
             onSaveToDownloads = { res ->
                 viewModel.saveMergedPdfToDownloads(res)
             }
+        )
+    }
+
+    // Support Development Dialog
+    if (showSupportDialog) {
+        SupportDevelopmentDialog(
+            onDismiss = { showSupportDialog = false }
         )
     }
 
