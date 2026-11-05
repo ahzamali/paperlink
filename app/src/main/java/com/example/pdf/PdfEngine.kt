@@ -19,6 +19,7 @@ import android.util.LruCache
 import com.example.data.model.CompressionEstimate
 import com.example.data.model.CompressionLevel
 import com.example.data.model.CompressionResult
+import com.example.data.model.MergeResult
 import com.example.data.model.NormalizedPoint
 import com.example.data.model.PdfSearchMatch
 import com.example.data.model.SearchHighlightRect
@@ -767,6 +768,105 @@ object PdfEngine {
                 e.printStackTrace()
                 try { destFile.delete() } catch (_: Throwable) {}
                 null
+            }
+        }
+    }
+
+    /**
+     * Merges multiple PDF documents in the specified order into a single unified PDF file.
+     * Pages are rendered at high resolution to preserve document clarity.
+     */
+    suspend fun mergePdfs(
+        sourceLocations: List<String>,
+        destFile: File,
+        targetWidth: Int = 1200
+    ): MergeResult? = withContext(Dispatchers.IO) {
+        if (sourceLocations.isEmpty()) return@withContext null
+
+        synchronized(rendererLock) {
+            closeRenderer() // Clear active cache before multi-file streaming
+            val pdfDoc = PdfDocument()
+            var globalPageNumber = 1
+
+            try {
+                for (sourceLoc in sourceLocations) {
+                    val pfd = openPfd(sourceLoc, "r") ?: stageSeekableCopy(sourceLoc)
+                    if (pfd == null) continue
+
+                    try {
+                        pfd.use { descriptor ->
+                            PdfRenderer(descriptor).use { renderer ->
+                                val pages = renderer.pageCount
+                                for (p in 0 until pages) {
+                                    try {
+                                        renderer.openPage(p).use { page ->
+                                            val origW = if (page.width > 0) page.width else 600
+                                            val origH = if (page.height > 0) page.height else 850
+                                            val scale = targetWidth.toFloat() / origW.toFloat()
+                                            val targetHeight = ((origH * scale).toInt()).coerceIn(100, 4096)
+
+                                            val pageInfo = PdfDocument.PageInfo.Builder(
+                                                targetWidth,
+                                                targetHeight,
+                                                globalPageNumber
+                                            ).create()
+                                            val pdfPage = pdfDoc.startPage(pageInfo)
+                                            val canvas = pdfPage.canvas
+
+                                            val bitmap = Bitmap.createBitmap(
+                                                targetWidth,
+                                                targetHeight,
+                                                Bitmap.Config.ARGB_8888
+                                            )
+                                            val bCanvas = Canvas(bitmap)
+                                            bCanvas.drawColor(Color.WHITE)
+                                            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
+
+                                            canvas.drawBitmap(bitmap, 0f, 0f, null)
+                                            bitmap.recycle()
+
+                                            pdfDoc.finishPage(pdfPage)
+                                            globalPageNumber++
+                                        }
+                                    } catch (pe: Throwable) {
+                                        pe.printStackTrace()
+                                    }
+                                }
+                            }
+                        }
+                    } catch (fe: Throwable) {
+                        fe.printStackTrace()
+                    }
+                }
+
+                if (globalPageNumber <= 1) {
+                    // No pages were successfully merged
+                    pdfDoc.close()
+                    return@withContext null
+                }
+
+                destFile.parentFile?.apply { if (!exists()) mkdirs() }
+                FileOutputStream(destFile).use { out ->
+                    pdfDoc.writeTo(out)
+                }
+                pdfDoc.close()
+
+                val totalMergedPages = globalPageNumber - 1
+                val outputSize = destFile.length()
+
+                MergeResult(
+                    title = destFile.nameWithoutExtension,
+                    outputFile = destFile,
+                    totalPageCount = totalMergedPages,
+                    outputSizeBytes = outputSize,
+                    mergedSourceCount = sourceLocations.size
+                )
+            } catch (e: Throwable) {
+                e.printStackTrace()
+                try { destFile.delete() } catch (_: Throwable) {}
+                null
+            } finally {
+                closeRenderer()
             }
         }
     }

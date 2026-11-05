@@ -135,3 +135,11 @@ data class CompressionResult(
     val outputFile: java.io.File,
     val isLarger: Boolean = compressedSizeBytes > originalSizeBytes
 )
+
+data class MergeResult(
+    val title: String,
+    val outputFile: java.io.File,
+    val totalPageCount: Int,
+    val outputSizeBytes: Long,
+    val mergedSourceCount: Int
+)

@@ -44,7 +44,10 @@ data class LibraryUiState(
     val userMessage: String? = null,
     val compressingDocument: DocumentEntity? = null,
     val isCompressing: Boolean = false,
-    val compressionResult: com.example.data.model.CompressionResult? = null
+    val compressionResult: com.example.data.model.CompressionResult? = null,
+    val showMergeDialog: Boolean = false,
+    val isMerging: Boolean = false,
+    val mergeResult: com.example.data.model.MergeResult? = null
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -58,6 +61,9 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     private val _compressingDoc = MutableStateFlow<DocumentEntity?>(null)
     private val _isCompressing = MutableStateFlow(false)
     private val _compressionResult = MutableStateFlow<com.example.data.model.CompressionResult?>(null)
+    private val _showMergeDialog = MutableStateFlow(false)
+    private val _isMerging = MutableStateFlow(false)
+    private val _mergeResult = MutableStateFlow<com.example.data.model.MergeResult?>(null)
 
     val uiState: StateFlow<LibraryUiState>
 
@@ -89,8 +95,11 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
             combine(_sortMode, _searchQuery, _isLoading) { s, q, l -> Triple(s, q, l) },
             combine(_userMessage, _compressingDoc, _isCompressing, _compressionResult) { msg, cDoc, cLoading, cRes ->
                 CompressTuple(msg, cDoc, cLoading, cRes)
+            },
+            combine(_showMergeDialog, _isMerging, _mergeResult) { sMerge, isM, mRes ->
+                MergeTuple(sMerge, isM, mRes)
             }
-        ) { tuple1, tuple2 ->
+        ) { tuple1, tuple2, tuple3 ->
             MetaTuple(
                 sortMode = tuple1.first,
                 searchQuery = tuple1.second,
@@ -98,7 +107,10 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
                 userMessage = tuple2.userMessage,
                 compressingDoc = tuple2.compressingDoc,
                 isCompressing = tuple2.isCompressing,
-                compressionResult = tuple2.compressionResult
+                compressionResult = tuple2.compressionResult,
+                showMergeDialog = tuple3.showMergeDialog,
+                isMerging = tuple3.isMerging,
+                mergeResult = tuple3.mergeResult
             )
         }
 
@@ -143,7 +155,10 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
                 userMessage = meta.userMessage,
                 compressingDocument = meta.compressingDoc,
                 isCompressing = meta.isCompressing,
-                compressionResult = meta.compressionResult
+                compressionResult = meta.compressionResult,
+                showMergeDialog = meta.showMergeDialog,
+                isMerging = meta.isMerging,
+                mergeResult = meta.mergeResult
             )
         }.stateIn(
             scope = viewModelScope,
@@ -164,6 +179,12 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
         val compressionResult: com.example.data.model.CompressionResult?
     )
 
+    private data class MergeTuple(
+        val showMergeDialog: Boolean,
+        val isMerging: Boolean,
+        val mergeResult: com.example.data.model.MergeResult?
+    )
+
     private data class MetaTuple(
         val sortMode: SortMode,
         val searchQuery: String,
@@ -171,7 +192,10 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
         val userMessage: String?,
         val compressingDoc: DocumentEntity?,
         val isCompressing: Boolean,
-        val compressionResult: com.example.data.model.CompressionResult?
+        val compressionResult: com.example.data.model.CompressionResult?,
+        val showMergeDialog: Boolean,
+        val isMerging: Boolean,
+        val mergeResult: com.example.data.model.MergeResult?
     )
 
     private suspend fun checkAndSeedSampleGuide() {
@@ -394,6 +418,97 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
             } catch (e: Exception) {
                 e.printStackTrace()
                 _userMessage.value = "Failed to export compressed file"
+            }
+        }
+    }
+
+    fun openMergeDialog() {
+        _showMergeDialog.value = true
+        _mergeResult.value = null
+    }
+
+    fun closeMergeDialog() {
+        _showMergeDialog.value = false
+        _isMerging.value = false
+        _mergeResult.value = null
+    }
+
+    fun mergePdfDocuments(items: List<com.example.ui.components.MergeableItem>, outputTitle: String) {
+        if (items.size < 2) {
+            _userMessage.value = "Please select at least 2 documents to merge"
+            return
+        }
+
+        viewModelScope.launch {
+            _isMerging.value = true
+            val context = getApplication<Application>()
+            val exportDir = File(context.cacheDir, "merged_pdf").apply { if (!exists()) mkdirs() }
+            val cleanName = outputTitle.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+            val destFile = File(exportDir, "${cleanName}_${System.currentTimeMillis()}.pdf")
+
+            val sourceLocations = items.map { it.uriString }
+            val result = PdfEngine.mergePdfs(
+                sourceLocations = sourceLocations,
+                destFile = destFile
+            )
+
+            _isMerging.value = false
+            if (result != null) {
+                _mergeResult.value = result
+                // Automatically register merged document in local library
+                try {
+                    val libDir = File(context.filesDir, "documents").apply { if (!exists()) mkdirs() }
+                    val savedFile = File(libDir, destFile.name)
+                    destFile.copyTo(savedFile, overwrite = true)
+
+                    repository.insertDocument(
+                        DocumentEntity(
+                            title = outputTitle,
+                            fileName = savedFile.name,
+                            filePath = savedFile.absolutePath,
+                            sourceLocation = "Merged (${items.size} files)",
+                            folderId = null,
+                            pageCount = result.totalPageCount,
+                            fileSizeBytes = savedFile.length(),
+                            currentPage = 0,
+                            tags = "Merged"
+                        )
+                    )
+                } catch (_: Exception) {}
+            } else {
+                _userMessage.value = "Failed to merge PDF documents"
+            }
+        }
+    }
+
+    fun shareMergedPdf(context: Context, result: com.example.data.model.MergeResult) {
+        try {
+            ShareHelper.sharePdfFile(
+                context = context,
+                file = result.outputFile,
+                title = "Merged PDF: ${result.title}",
+                chooserTitle = "Share Merged PDF"
+            )
+        } catch (e: Exception) {
+            e.printStackTrace()
+            _userMessage.value = "Could not share merged file"
+        }
+    }
+
+    fun saveMergedPdfToDownloads(result: com.example.data.model.MergeResult) {
+        viewModelScope.launch {
+            try {
+                val context = getApplication<Application>()
+                val savedUri = ShareHelper.savePdfToDownloads(context, result.outputFile)
+                if (savedUri != null) {
+                    _userMessage.value = "Saved '${result.outputFile.name}' to Downloads!"
+                    closeMergeDialog()
+                } else {
+                    _userMessage.value = "Failed to save to Downloads"
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                _userMessage.value = "Failed to save to Downloads"
             }
         }
     }

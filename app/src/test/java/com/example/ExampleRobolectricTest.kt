@@ -353,5 +353,37 @@ class ExampleRobolectricTest {
     val declaredFields = com.example.ui.viewmodel.ReaderUiState::class.java.declaredFields.map { it.name }
     org.junit.Assert.assertFalse(declaredFields.any { it.contains("password", ignoreCase = true) && !it.contains("Required") && !it.contains("Error") })
   }
+
+  @Test
+  fun `library ui state supports merge dialog and state transitions`() {
+    val initialState = com.example.ui.viewmodel.LibraryUiState()
+    org.junit.Assert.assertFalse(initialState.showMergeDialog)
+    org.junit.Assert.assertFalse(initialState.isMerging)
+    org.junit.Assert.assertNull(initialState.mergeResult)
+
+    val mergedFile = java.io.File.createTempFile("merged_test", ".pdf")
+    try {
+      mergedFile.writeText("%PDF-1.4 mock merged pdf content")
+      val mergeResult = com.example.data.model.MergeResult(
+          title = "Combined Document",
+          outputFile = mergedFile,
+          totalPageCount = 4,
+          outputSizeBytes = mergedFile.length(),
+          mergedSourceCount = 2
+      )
+
+      val mergedState = initialState.copy(
+          showMergeDialog = true,
+          mergeResult = mergeResult
+      )
+      assertTrue(mergedState.showMergeDialog)
+      org.junit.Assert.assertNotNull(mergedState.mergeResult)
+      assertEquals(4, mergedState.mergeResult?.totalPageCount)
+      assertEquals(2, mergedState.mergeResult?.mergedSourceCount)
+      assertEquals("Combined Document", mergedState.mergeResult?.title)
+    } finally {
+      mergedFile.delete()
+    }
+  }
 }
 

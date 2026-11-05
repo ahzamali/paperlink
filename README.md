@@ -52,6 +52,12 @@ A modern, fast, privacy-focused Android PDF reader, annotator, and organizer cra
   - **Maximum Compression** (35% quality) – Extreme size reduction for bandwidth-constrained scenarios.
 - Direct **Save to Storage** and **Share** intents for compressed outputs.
 
+### 📑 Multi-PDF Merging
+- Merge two or more PDF files into a single unified document with custom ordering.
+- Select files directly from the local library or browse device storage.
+- Reorder documents with up/down controls before merging.
+- Direct **Save to Downloads**, **Share**, and automatic library cataloging of merged files.
+
 ### 🖨️ Native Printing
 - Seamless integration with Android's native `PrintManager` and `PrintDocumentAdapter` to print documents directly to physical Wi-Fi printers or export to standard Android PDF print formats.
 

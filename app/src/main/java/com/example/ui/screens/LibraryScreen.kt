@@ -28,7 +28,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.automirrored.filled.TrendingDown
+import androidx.compose.material.icons.filled.CallMerge
 import com.example.ui.components.CompressPdfDialog
+import com.example.ui.components.MergePdfDialog
+import com.example.ui.components.MergeableItem
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
@@ -127,6 +130,16 @@ fun LibraryScreen(
         }
     }
 
+    // Opens additional PDF from mass storage to include into the merge list
+    var onMergeDocumentPicked by remember { mutableStateOf<((Uri) -> Unit)?>(null) }
+    val mergeDocPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        uri?.let { pickedUri ->
+            onMergeDocumentPicked?.invoke(pickedUri)
+        }
+    }
+
     LaunchedEffect(uiState.userMessage) {
         uiState.userMessage?.let {
             snackbarHostState.showSnackbar(it)
@@ -205,6 +218,14 @@ fun LibraryScreen(
                         ) {
                             Icon(Icons.Default.Search, contentDescription = "Search Documents")
                         }
+                    }
+
+                    // Merge PDFs button
+                    IconButton(
+                        onClick = { viewModel.openMergeDialog() },
+                        modifier = Modifier.testTag("merge_pdfs_button")
+                    ) {
+                        Icon(Icons.Default.CallMerge, contentDescription = "Merge PDFs")
                     }
 
                     // Open from URL button
@@ -404,6 +425,33 @@ fun LibraryScreen(
             onCompress = { level -> viewModel.compressDocument(doc, level) },
             onShareResult = { res -> viewModel.shareCompressedPdf(context, res) },
             onExportSave = { res -> viewModel.exportCompressedPdf(res) }
+        )
+    }
+
+    // Merge PDFs Dialog
+    if (uiState.showMergeDialog) {
+        MergePdfDialog(
+            availableDocuments = uiState.documents,
+            isMerging = uiState.isMerging,
+            mergeResult = uiState.mergeResult,
+            onDismiss = { viewModel.closeMergeDialog() },
+            onAddFromStorage = {
+                onMergeDocumentPicked = { pickedUri ->
+                    viewModel.openPdf(pickedUri) { _ ->
+                        // Automatically imported to library list, user can pick it
+                    }
+                }
+                mergeDocPickerLauncher.launch(arrayOf("application/pdf"))
+            },
+            onMergeConfirmed = { items, title ->
+                viewModel.mergePdfDocuments(items, title)
+            },
+            onShareResult = { res ->
+                viewModel.shareMergedPdf(context, res)
+            },
+            onSaveToDownloads = { res ->
+                viewModel.saveMergedPdfToDownloads(res)
+            }
         )
     }
 
