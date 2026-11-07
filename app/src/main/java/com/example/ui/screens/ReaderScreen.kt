@@ -1241,7 +1241,7 @@ fun ReaderScreen(
             isCompressing = uiState.isCompressing,
             compressionResult = uiState.compressionResult,
             onDismiss = { viewModel.setCompressDialogVisible(false) },
-            onCompress = { level -> viewModel.compressDocument(level) },
+            onCompress = { level, isGrayscale, revertIfLarger -> viewModel.compressDocument(level, isGrayscale, revertIfLarger) },
             onShareResult = { result -> viewModel.shareCompressedPdf(context, result) },
             onExportSave = { result -> viewModel.exportCompressedPdf(result) }
         )

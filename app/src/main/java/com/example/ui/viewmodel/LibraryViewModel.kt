@@ -305,13 +305,19 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
         _compressionResult.value = null
     }
 
-    fun compressDocument(doc: DocumentEntity, level: CompressionLevel) {
+    fun compressDocument(
+        doc: DocumentEntity,
+        level: CompressionLevel,
+        isGrayscale: Boolean = false,
+        revertIfLarger: Boolean = false
+    ) {
         viewModelScope.launch {
             _isCompressing.value = true
             val context = getApplication<Application>()
             val exportDir = File(context.cacheDir, "compressed_pdf").apply { if (!exists()) mkdirs() }
             val cleanName = doc.title.replace(Regex("[^a-zA-Z0-9_-]"), "_")
-            val destFile = File(exportDir, "${cleanName}_compressed_${System.currentTimeMillis()}.pdf")
+            val suffix = if (isGrayscale) "_bw" else ""
+            val destFile = File(exportDir, "${cleanName}${suffix}_compressed_${System.currentTimeMillis()}.pdf")
 
             // fetch annotations for this doc to burn them into the compressed output
             val rawAnnotations = repository.getAllAnnotationsForDocument(doc.id)
@@ -351,16 +357,20 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
                 sourceLocation = doc.filePath,
                 destFile = destFile,
                 level = level,
-                allAnnotationsByPage = allAnnotations
+                allAnnotationsByPage = allAnnotations,
+                convertToGrayscale = isGrayscale,
+                revertIfLarger = revertIfLarger
             )
 
             _isCompressing.value = false
             _compressionResult.value = result
             _userMessage.value = if (result != null) {
-                if (result.isLarger) {
+                if (result.wasRevertedDueToSize) {
+                    "Protected original document: recompression would have increased size."
+                } else if (result.isLarger) {
                     "Document size increased (+${kotlin.math.abs(result.savedPercentage)}%) due to vector rasterization."
                 } else {
-                    "Compressed: saved ${result.savedPercentage}%"
+                    "Compressed: saved ${result.savedPercentage}%" + if (result.isGrayscale) " (Grayscale)" else ""
                 }
             } else "Compression failed"
         }

@@ -437,7 +437,7 @@ fun LibraryScreen(
             isCompressing = uiState.isCompressing,
             compressionResult = uiState.compressionResult,
             onDismiss = { viewModel.dismissCompressDialog() },
-            onCompress = { level -> viewModel.compressDocument(doc, level) },
+            onCompress = { level, isGrayscale, revertIfLarger -> viewModel.compressDocument(doc, level, isGrayscale, revertIfLarger) },
             onShareResult = { res -> viewModel.shareCompressedPdf(context, res) },
             onExportSave = { res -> viewModel.exportCompressedPdf(res) }
         )

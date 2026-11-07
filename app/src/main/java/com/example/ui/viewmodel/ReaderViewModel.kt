@@ -754,14 +754,19 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun compressDocument(level: CompressionLevel) {
+    fun compressDocument(
+        level: CompressionLevel,
+        isGrayscale: Boolean = false,
+        revertIfLarger: Boolean = false
+    ) {
         val doc = _uiState.value.document ?: return
         viewModelScope.launch {
             _uiState.update { it.copy(isCompressing = true) }
             val context = getApplication<Application>()
             val exportDir = File(context.cacheDir, "compressed_pdf").apply { if (!exists()) mkdirs() }
             val cleanName = doc.title.replace(Regex("[^a-zA-Z0-9_-]"), "_")
-            val destFile = File(exportDir, "${cleanName}_compressed_${System.currentTimeMillis()}.pdf")
+            val suffix = if (isGrayscale) "_bw" else ""
+            val destFile = File(exportDir, "${cleanName}${suffix}_compressed_${System.currentTimeMillis()}.pdf")
 
             val allAnnotations = mutableMapOf<Int, Pair<List<StrokeAnnotation>, List<TextAnnotation>>>()
             for (p in 0 until _uiState.value.totalPages) {
@@ -775,15 +780,19 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
                 sourceLocation = doc.filePath,
                 destFile = destFile,
                 level = level,
-                allAnnotationsByPage = allAnnotations
+                allAnnotationsByPage = allAnnotations,
+                convertToGrayscale = isGrayscale,
+                revertIfLarger = revertIfLarger
             )
 
             _uiState.update {
                 val msg = if (result != null) {
-                    if (result.isLarger) {
+                    if (result.wasRevertedDueToSize) {
+                        "Protected original document: recompression would have increased size."
+                    } else if (result.isLarger) {
                         "Compressed file is larger (+${-result.savedPercentage}%)"
                     } else {
-                        "Compressed: saved ${result.savedPercentage}%"
+                        "Compressed: saved ${result.savedPercentage}%" + if (result.isGrayscale) " (Grayscale)" else ""
                     }
                 } else {
                     "Compression failed"

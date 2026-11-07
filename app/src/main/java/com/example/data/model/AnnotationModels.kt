@@ -125,7 +125,8 @@ data class CompressionEstimate(
     val estimatedSizeBytes: Long,
     val estimatedSavingsPercentage: Int,
     val willLikelyIncrease: Boolean,
-    val recommendation: String
+    val recommendation: String,
+    val isGrayscale: Boolean = false
 )
 
 data class CompressionResult(
@@ -133,7 +134,9 @@ data class CompressionResult(
     val compressedSizeBytes: Long,
     val savedPercentage: Int,
     val outputFile: java.io.File,
-    val isLarger: Boolean = compressedSizeBytes > originalSizeBytes
+    val isLarger: Boolean = compressedSizeBytes > originalSizeBytes,
+    val isGrayscale: Boolean = false,
+    val wasRevertedDueToSize: Boolean = false
 )
 
 data class MergeResult(

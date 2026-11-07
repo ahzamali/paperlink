@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -32,8 +33,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -69,14 +72,16 @@ fun CompressPdfDialog(
     isCompressing: Boolean,
     compressionResult: CompressionResult?,
     onDismiss: () -> Unit,
-    onCompress: (CompressionLevel) -> Unit,
+    onCompress: (level: CompressionLevel, isGrayscale: Boolean, revertIfLarger: Boolean) -> Unit,
     onShareResult: (CompressionResult) -> Unit,
     onExportSave: ((CompressionResult) -> Unit)? = null
 ) {
     var selectedLevel by remember { mutableStateOf(CompressionLevel.BALANCED) }
+    var isGrayscale by remember { mutableStateOf(false) }
+    var autoRevertIfLarger by remember { mutableStateOf(false) }
 
-    val currentEstimate = remember(originalSizeBytes, pageCount, selectedLevel) {
-        PdfEngine.estimateCompressedSize(originalSizeBytes, pageCount, selectedLevel)
+    val currentEstimate = remember(originalSizeBytes, pageCount, selectedLevel, isGrayscale) {
+        PdfEngine.estimateCompressedSize(originalSizeBytes, pageCount, selectedLevel, isGrayscale)
     }
 
     AlertDialog(
@@ -123,7 +128,51 @@ fun CompressPdfDialog(
             Column(modifier = Modifier.fillMaxWidth()) {
                 if (compressionResult != null) {
                     // Result View
-                    if (compressionResult.isLarger) {
+                    if (compressionResult.wasRevertedDueToSize) {
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = Color(0xFFEFF6FF),
+                            border = BorderStroke(1.dp, Color(0xFFBFDBFE)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = Color(0xFF3B82F6),
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                Icons.Default.Shield,
+                                                contentDescription = null,
+                                                tint = Color.White,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Original File Protected",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF1E40AF)
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Text(
+                                    text = "Recompression would have expanded file size (+${abs(compressionResult.savedPercentage)}%) due to vector rasterization. As requested by your size safeguard, the larger output was discarded and your original file (${formatFileSize(compressionResult.originalSizeBytes)}) was preserved.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(0xFF1E3A8A),
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
+                    } else if (compressionResult.isLarger) {
                         // Advisory banner when compression increased file size
                         Surface(
                             shape = RoundedCornerShape(14.dp),
@@ -220,7 +269,7 @@ fun CompressPdfDialog(
                                     }
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
-                                        text = "${compressionResult.savedPercentage}% Smaller",
+                                        text = "${compressionResult.savedPercentage}% Smaller" + if (compressionResult.isGrayscale) " (Grayscale)" else "",
                                         style = MaterialTheme.typography.titleSmall,
                                         fontWeight = FontWeight.Bold,
                                         color = Color(0xFF065F46)
@@ -284,7 +333,7 @@ fun CompressPdfDialog(
                             fontWeight = FontWeight.SemiBold
                         )
                         Text(
-                            text = "Recompressing page bitmaps & streams",
+                            text = if (isGrayscale) "Converting to monochrome & recompressing streams" else "Recompressing page bitmaps & streams",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -319,8 +368,8 @@ fun CompressPdfDialog(
 
                     CompressionLevel.values().forEach { level ->
                         val isSelected = selectedLevel == level
-                        val levelEst = remember(originalSizeBytes, pageCount, level) {
-                            PdfEngine.estimateCompressedSize(originalSizeBytes, pageCount, level)
+                        val levelEst = remember(originalSizeBytes, pageCount, level, isGrayscale) {
+                            PdfEngine.estimateCompressedSize(originalSizeBytes, pageCount, level, isGrayscale)
                         }
 
                         Surface(
@@ -391,8 +440,94 @@ fun CompressPdfDialog(
                         }
                     }
 
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Stirling-PDF inspired optimizations
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            // Grayscale Switch
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { isGrayscale = !isGrayscale },
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = "Convert to Grayscale (B&W)",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Surface(
+                                            shape = RoundedCornerShape(4.dp),
+                                            color = Color(0xFFECFDF5)
+                                        ) {
+                                            Text(
+                                                text = "-35% size",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = Color(0xFF047857),
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                            )
+                                        }
+                                    }
+                                    Text(
+                                        text = "Discards color channels for maximum compression",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Switch(
+                                    checked = isGrayscale,
+                                    onCheckedChange = { isGrayscale = it },
+                                    modifier = Modifier.testTag("switch_grayscale")
+                                )
+                            }
+
+                            // Keep original guard
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { autoRevertIfLarger = !autoRevertIfLarger },
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Keep original if size increases",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = "Guards against vector-to-raster size inflation",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Switch(
+                                    checked = autoRevertIfLarger,
+                                    onCheckedChange = { autoRevertIfLarger = it },
+                                    modifier = Modifier.testTag("switch_auto_revert")
+                                )
+                            }
+                        }
+                    }
+
                     // Warning card when selected compression is predicted to increase file size
-                    if (currentEstimate.willLikelyIncrease && originalSizeBytes > 0) {
+                    if (currentEstimate.willLikelyIncrease && originalSizeBytes > 0 && !autoRevertIfLarger) {
                         Spacer(modifier = Modifier.height(10.dp))
                         Surface(
                             shape = RoundedCornerShape(10.dp),
@@ -428,35 +563,37 @@ fun CompressPdfDialog(
         },
         confirmButton = {
             if (compressionResult != null) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    if (onExportSave != null) {
-                        OutlinedButton(
-                            onClick = { onExportSave(compressionResult) },
-                            modifier = Modifier.testTag("export_save_compressed_button")
-                        ) {
-                            Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Export")
-                        }
-                    }
-                    Button(
-                        onClick = { onShareResult(compressionResult) },
-                        modifier = Modifier.testTag("share_compressed_pdf_button")
+                if (!compressionResult.wasRevertedDueToSize) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Share")
+                        if (onExportSave != null) {
+                            OutlinedButton(
+                                onClick = { onExportSave(compressionResult) },
+                                modifier = Modifier.testTag("export_save_compressed_button")
+                            ) {
+                                Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Export")
+                            }
+                        }
+                        Button(
+                            onClick = { onShareResult(compressionResult) },
+                            modifier = Modifier.testTag("share_compressed_pdf_button")
+                        ) {
+                            Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Share")
+                        }
                     }
                 }
             } else if (!isCompressing) {
                 Button(
-                    onClick = { onCompress(selectedLevel) },
+                    onClick = { onCompress(selectedLevel, isGrayscale, autoRevertIfLarger) },
                     modifier = Modifier.testTag("start_compression_button")
                 ) {
-                    Text(if (currentEstimate.willLikelyIncrease && originalSizeBytes > 0) "Compress Anyway" else "Compress Document")
+                    Text(if (currentEstimate.willLikelyIncrease && originalSizeBytes > 0 && !autoRevertIfLarger) "Compress Anyway" else "Compress Document")
                 }
             }
         },

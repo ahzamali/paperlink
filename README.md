@@ -192,6 +192,13 @@ git push origin v1.0.3-beta
 
 ---
 
+## Acknowledgements & Inspirations
+
+- **[Stirling-PDF](https://github.com/Stirling-Tools/Stirling-PDF)** (MIT License):
+  Inspired our multi-tier PDF compression architecture, 8-bit monochrome/grayscale conversion for extreme space savings, size regression safeguard, and memory-safe streaming merge pipelines.
+
+---
+
 ## License
 
 PaperInk PDF is licensed under the **Apache License, Version 2.0**. See the [LICENSE](LICENSE) file for details.

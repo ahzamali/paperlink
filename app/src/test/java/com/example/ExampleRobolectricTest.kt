@@ -385,5 +385,52 @@ class ExampleRobolectricTest {
       mergedFile.delete()
     }
   }
+
+  @Test
+  fun `estimateCompressedSize calculates extra reduction for grayscale mode`() {
+    val origSize = 5 * 1024 * 1024L // 5 MB
+    val pageCount = 10
+    val normalEst = com.example.pdf.PdfEngine.estimateCompressedSize(
+        originalSizeBytes = origSize,
+        pageCount = pageCount,
+        level = com.example.data.model.CompressionLevel.BALANCED,
+        isGrayscale = false
+    )
+    val grayEst = com.example.pdf.PdfEngine.estimateCompressedSize(
+        originalSizeBytes = origSize,
+        pageCount = pageCount,
+        level = com.example.data.model.CompressionLevel.BALANCED,
+        isGrayscale = true
+    )
+
+    assertTrue(grayEst.isGrayscale)
+    org.junit.Assert.assertFalse(normalEst.isGrayscale)
+    // Grayscale estimation should be smaller than full color estimation
+    assertTrue(grayEst.estimatedSizeBytes < normalEst.estimatedSizeBytes)
+    assertTrue(grayEst.estimatedSavingsPercentage >= normalEst.estimatedSavingsPercentage)
+  }
+
+  @Test
+  fun `compression result supports grayscale and size reversion flags`() {
+    val testFile = java.io.File.createTempFile("comp_test", ".pdf")
+    try {
+      testFile.writeText("%PDF-1.4 sample content")
+      val result = com.example.data.model.CompressionResult(
+          originalSizeBytes = 5000L,
+          compressedSizeBytes = 5000L,
+          savedPercentage = 0,
+          outputFile = testFile,
+          isLarger = false,
+          isGrayscale = true,
+          wasRevertedDueToSize = true
+      )
+
+      assertTrue(result.isGrayscale)
+      assertTrue(result.wasRevertedDueToSize)
+      assertEquals(5000L, result.originalSizeBytes)
+    } finally {
+      testFile.delete()
+    }
+  }
 }
 

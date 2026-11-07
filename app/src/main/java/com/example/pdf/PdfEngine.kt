@@ -4,6 +4,8 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PorterDuff
@@ -562,11 +564,17 @@ object PdfEngine {
     fun estimateCompressedSize(
         originalSizeBytes: Long,
         pageCount: Int,
-        level: CompressionLevel
+        level: CompressionLevel,
+        isGrayscale: Boolean = false
     ): CompressionEstimate {
         val pages = pageCount.coerceAtLeast(1)
         val basePdfOverhead = 15 * 1024L
-        val estimatedOutput = (pages * level.estimatedBytesPerPage) + basePdfOverhead
+        val bytesPerPage = if (isGrayscale) {
+            (level.estimatedBytesPerPage * 0.65f).toLong()
+        } else {
+            level.estimatedBytesPerPage
+        }
+        val estimatedOutput = (pages * bytesPerPage) + basePdfOverhead
 
         fun formatBytes(bytes: Long): String {
             if (bytes <= 0) return "0 B"
@@ -584,7 +592,8 @@ object PdfEngine {
                 estimatedSizeBytes = estimatedOutput,
                 estimatedSavingsPercentage = 0,
                 willLikelyIncrease = false,
-                recommendation = "Estimated size: ~${formatBytes(estimatedOutput)}"
+                recommendation = "Estimated size: ~${formatBytes(estimatedOutput)}",
+                isGrayscale = isGrayscale
             )
         }
 
@@ -607,7 +616,8 @@ object PdfEngine {
             estimatedSizeBytes = estimatedOutput,
             estimatedSavingsPercentage = savingsPct,
             willLikelyIncrease = willIncrease,
-            recommendation = recommendation
+            recommendation = recommendation,
+            isGrayscale = isGrayscale
         )
     }
 
@@ -617,7 +627,8 @@ object PdfEngine {
     suspend fun sampleSinglePageCompression(
         sourceLocation: String,
         level: CompressionLevel,
-        pageIndex: Int = 0
+        pageIndex: Int = 0,
+        isGrayscale: Boolean = false
     ): Long? = withContext(Dispatchers.IO) {
         synchronized(rendererLock) {
             try {
@@ -634,9 +645,23 @@ object PdfEngine {
                     canvas.drawColor(Color.WHITE)
                     page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
 
+                    val finalBmp = if (isGrayscale) {
+                        val grayBitmap = Bitmap.createBitmap(level.targetWidth, targetHeight, Bitmap.Config.RGB_565)
+                        val grayCanvas = Canvas(grayBitmap)
+                        val grayPaint = Paint().apply {
+                            val cm = ColorMatrix().apply { setSaturation(0f) }
+                            colorFilter = ColorMatrixColorFilter(cm)
+                        }
+                        grayCanvas.drawBitmap(bmp, 0f, 0f, grayPaint)
+                        bmp.recycle()
+                        grayBitmap
+                    } else {
+                        bmp
+                    }
+
                     val stream = ByteArrayOutputStream()
-                    bmp.compress(Bitmap.CompressFormat.JPEG, level.jpegQuality, stream)
-                    bmp.recycle()
+                    finalBmp.compress(Bitmap.CompressFormat.JPEG, level.jpegQuality, stream)
+                    finalBmp.recycle()
                     stream.size().toLong()
                 }
             } catch (e: Throwable) {
@@ -650,7 +675,9 @@ object PdfEngine {
         sourceLocation: String,
         destFile: File,
         level: CompressionLevel,
-        allAnnotationsByPage: Map<Int, Pair<List<StrokeAnnotation>, List<TextAnnotation>>> = emptyMap()
+        allAnnotationsByPage: Map<Int, Pair<List<StrokeAnnotation>, List<TextAnnotation>>> = emptyMap(),
+        convertToGrayscale: Boolean = false,
+        revertIfLarger: Boolean = false
     ): CompressionResult? = withContext(Dispatchers.IO) {
         var originalSize = 0L
         if (sourceLocation.startsWith("content://")) {
@@ -713,9 +740,23 @@ object PdfEngine {
                                 drawAnnotationsOnCanvas(baseCanvas, targetWidth, targetHeight, strokes, texts)
                             }
 
+                            val finalBitmap = if (convertToGrayscale) {
+                                val grayBitmap = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.RGB_565)
+                                val grayCanvas = Canvas(grayBitmap)
+                                val grayPaint = Paint().apply {
+                                    val cm = ColorMatrix().apply { setSaturation(0f) }
+                                    colorFilter = ColorMatrixColorFilter(cm)
+                                }
+                                grayCanvas.drawBitmap(fullBitmap, 0f, 0f, grayPaint)
+                                fullBitmap.recycle()
+                                grayBitmap
+                            } else {
+                                fullBitmap
+                            }
+
                             val compressedStream = ByteArrayOutputStream()
-                            fullBitmap.compress(Bitmap.CompressFormat.JPEG, level.jpegQuality, compressedStream)
-                            fullBitmap.recycle()
+                            finalBitmap.compress(Bitmap.CompressFormat.JPEG, level.jpegQuality, compressedStream)
+                            finalBitmap.recycle()
 
                             val compressedBytes = compressedStream.toByteArray()
                             val compressedBitmap = android.graphics.BitmapFactory.decodeByteArray(compressedBytes, 0, compressedBytes.size)
@@ -749,6 +790,12 @@ object PdfEngine {
 
                 val compressedSize = destFile.length()
                 val isLarger = compressedSize > originalSize && originalSize > 0
+                val wasReverted = revertIfLarger && isLarger
+
+                if (wasReverted) {
+                    try { destFile.delete() } catch (_: Throwable) {}
+                }
+
                 val savedPct = if (originalSize > 0) {
                     if (isLarger) {
                         -(((compressedSize - originalSize).toFloat() / originalSize) * 100).toInt()
@@ -759,10 +806,12 @@ object PdfEngine {
 
                 CompressionResult(
                     originalSizeBytes = originalSize,
-                    compressedSizeBytes = compressedSize,
-                    savedPercentage = savedPct,
+                    compressedSizeBytes = if (wasReverted) originalSize else compressedSize,
+                    savedPercentage = if (wasReverted) 0 else savedPct,
                     outputFile = destFile,
-                    isLarger = isLarger
+                    isLarger = isLarger,
+                    isGrayscale = convertToGrayscale,
+                    wasRevertedDueToSize = wasReverted
                 )
             } catch (e: Throwable) {
                 e.printStackTrace()
@@ -802,28 +851,37 @@ object PdfEngine {
                                         renderer.openPage(p).use { page ->
                                             val origW = if (page.width > 0) page.width else 600
                                             val origH = if (page.height > 0) page.height else 850
-                                            val scale = targetWidth.toFloat() / origW.toFloat()
-                                            val targetHeight = ((origH * scale).toInt()).coerceIn(100, 4096)
 
+                                            // Preserve exact original point dimensions for the output page
                                             val pageInfo = PdfDocument.PageInfo.Builder(
-                                                targetWidth,
-                                                targetHeight,
+                                                origW,
+                                                origH,
                                                 globalPageNumber
                                             ).create()
                                             val pdfPage = pdfDoc.startPage(pageInfo)
                                             val canvas = pdfPage.canvas
 
-                                            val bitmap = Bitmap.createBitmap(
-                                                targetWidth,
-                                                targetHeight,
-                                                Bitmap.Config.ARGB_8888
-                                            )
-                                            val bCanvas = Canvas(bitmap)
-                                            bCanvas.drawColor(Color.WHITE)
-                                            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
+                                            // Render at crisp resolution preserving aspect ratio, using memory-efficient RGB_565 (50% RAM savings)
+                                            val maxDim = maxOf(origW, origH).toFloat()
+                                            val scale = (1400f / maxDim).coerceIn(1.0f, 2.5f)
+                                            val renderW = ((origW * scale).toInt()).coerceIn(100, 4096)
+                                            val renderH = ((origH * scale).toInt()).coerceIn(100, 4096)
 
-                                            canvas.drawBitmap(bitmap, 0f, 0f, null)
-                                            bitmap.recycle()
+                                            val bitmap = Bitmap.createBitmap(
+                                                renderW,
+                                                renderH,
+                                                Bitmap.Config.RGB_565
+                                            )
+                                            try {
+                                                val bCanvas = Canvas(bitmap)
+                                                bCanvas.drawColor(Color.WHITE)
+                                                page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
+
+                                                val destRect = RectF(0f, 0f, origW.toFloat(), origH.toFloat())
+                                                canvas.drawBitmap(bitmap, null, destRect, null)
+                                            } finally {
+                                                bitmap.recycle()
+                                            }
 
                                             pdfDoc.finishPage(pdfPage)
                                             globalPageNumber++
@@ -846,19 +904,16 @@ object PdfEngine {
                 }
 
                 destFile.parentFile?.apply { if (!exists()) mkdirs() }
-                FileOutputStream(destFile).use { out ->
+                java.io.FileOutputStream(destFile).use { out ->
                     pdfDoc.writeTo(out)
                 }
                 pdfDoc.close()
 
-                val totalMergedPages = globalPageNumber - 1
-                val outputSize = destFile.length()
-
                 MergeResult(
                     title = destFile.nameWithoutExtension,
                     outputFile = destFile,
-                    totalPageCount = totalMergedPages,
-                    outputSizeBytes = outputSize,
+                    totalPageCount = globalPageNumber - 1,
+                    outputSizeBytes = destFile.length(),
                     mergedSourceCount = sourceLocations.size
                 )
             } catch (e: Throwable) {
