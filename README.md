@@ -136,7 +136,7 @@ cd paperlink
 ### Firebase Setup (Optional)
 If you wish to enable Firebase Analytics or Crashlytics:
 1. Create a project in the [Firebase Console](https://console.firebase.google.com/).
-2. Add an Android app with package name `com.example.paperinkpdf` (or your custom package ID).
+2. Add an Android app with package name `com.paperink` (or your custom package ID).
 3. Download `google-services.json` and place it in the `app/` folder.
 
 ---

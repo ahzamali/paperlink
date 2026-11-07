@@ -9,7 +9,7 @@
       "client_info": {
         "mobilesdk_app_id": "1:605487007327:android:d66b4e8f27fe9c9f8f7dea",
         "android_client_info": {
-          "package_name": "com.aistudio.paperink.pdfapp"
+          "package_name": "com.paperink"
         }
       },
       "oauth_client": [],
@@ -28,7 +28,7 @@
       "client_info": {
         "mobilesdk_app_id": "1:605487007327:android:d66b4e8f27fe9c9f8f7dea",
         "android_client_info": {
-          "package_name": "com.example"
+          "package_name": "com.aistudio.paperink.pdfapp"
         }
       },
       "oauth_client": [],
