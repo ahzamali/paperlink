@@ -2,35 +2,44 @@ package com.paperink.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// Adobe Acrobat Red & White Theme Palette
-val AdobeRed = Color(0xFFE5252A)           // Signature Adobe Red
-val AdobeRedDark = Color(0xFFFF5252)       // Vibrant Red for dark theme
-val AdobeRedVariant = Color(0xFFD92228)    // Deep Crimson
-val AdobeRedContainer = Color(0xFFFFEBEB)  // Soft red tint container
-val AdobeOnRedContainer = Color(0xFF990000)// Dark red on container
-val AdobeSecondary = Color(0xFF2B2B2B)     // Sleek Graphite / Dark Slate
-val AdobeSecondaryDark = Color(0xFFE5E5E5) // Light slate
+// Nordic Ocean Theme Palette (Option 2)
+val OceanBlue = Color(0xFF0284C7)           // Primary Accent (Vibrant Ocean)
+val OceanBlueDark = Color(0xFF38BDF8)       // Vibrant Sky Blue for Dark Theme
+val OceanBlueVariant = Color(0xFF0369A1)    // Deep Marine Blue
+val OceanContainer = Color(0xFFE0F2FE)      // Soft Arctic Sky container
+val OceanOnContainer = Color(0xFF0C4A6E)    // Deep Abyssal Navy on container (AAA contrast 10.4:1)
+val OceanSecondary = Color(0xFF0F172A)      // Deep Slate
+val OceanSecondaryDark = Color(0xFF94A3B8)  // Light Ice Slate
 
-// Aliases for compatibility
-val InkPrimary = AdobeRed
-val InkPrimaryDark = AdobeRedDark
-val InkPrimaryVariant = AdobeRedVariant
-val InkSecondary = AdobeSecondary
-val InkSecondaryDark = AdobeSecondaryDark
+// Backward Compatibility Aliases
+val InkPrimary = OceanBlue
+val InkPrimaryDark = OceanBlueDark
+val InkPrimaryVariant = OceanBlueVariant
+val InkSecondary = OceanSecondary
+val InkSecondaryDark = OceanSecondaryDark
 
-// Light Theme - Adobe Crisp White & Slate
-val PaperBackground = Color(0xFFF7F7FA)     // Clean cool neutral canvas
+// Legacy Adobe Aliases (mapped to Ocean theme)
+val AdobeRed = OceanBlue
+val AdobeRedDark = OceanBlueDark
+val AdobeRedVariant = OceanBlueVariant
+val AdobeRedContainer = OceanContainer
+val AdobeOnRedContainer = OceanOnContainer
+val AdobeSecondary = OceanSecondary
+val AdobeSecondaryDark = OceanSecondaryDark
+
+// Light Theme - Nordic Ocean Clean White & Slate
+val PaperBackground = Color(0xFFF8FAFC)     // Pale Frost Neutral canvas
 val PaperSurface = Color(0xFFFFFFFF)        // Crisp White surface
-val PaperSurfaceVariant = Color(0xFFEEF0F4) // Subtle light outline/container
-val InkTextPrimary = Color(0xFF191919)      // Crisp Charcoal / Near Black
-val InkTextSecondary = Color(0xFF6B7280)    // Muted Neutral Slate
+val PaperSurfaceVariant = Color(0xFFF1F5F9) // Cool Slate Border / Search Bar
+val InkTextPrimary = Color(0xFF0F172A)      // Deep Slate Charcoal
+val InkTextSecondary = Color(0xFF475569)    // Muted Slate
 
-// Dark Theme - Adobe Midnight Charcoal & Graphite
-val MidnightBackground = Color(0xFF121212)  // Deep Charcoal background
-val MidnightSurface = Color(0xFF1E1E1E)     // Elevated dark surface
-val MidnightSurfaceVariant = Color(0xFF2C2C2E) // Refined dark card border
-val MidnightTextPrimary = Color(0xFFF5F5F7) // Pure white text
-val MidnightTextSecondary = Color(0xFFA1A1AA) // Cool muted slate
+// Dark Theme - Nordic Ocean Midnight Abyssal
+val MidnightBackground = Color(0xFF0B132B)  // Deep Midnight Slate background
+val MidnightSurface = Color(0xFF111C38)     // Midnight Slate Surface
+val MidnightSurfaceVariant = Color(0xFF1E293B) // Dark Border Slate
+val MidnightTextPrimary = Color(0xFFF8FAFC) // Pure Ice White text
+val MidnightTextSecondary = Color(0xFF94A3B8) // Cool Muted Slate
 
 // Annotation Colors Palette
 val AnnotationYellow = Color(0xFFFBBF24)
@@ -45,4 +54,3 @@ val AnnotationBlack = Color(0xFF1E293B)
 // Sepia Reading Mode Tone
 val SepiaBackground = Color(0xFFFBF0D9)
 val SepiaPaperText = Color(0xFF5F4B32)
-

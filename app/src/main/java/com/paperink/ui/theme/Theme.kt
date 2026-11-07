@@ -12,37 +12,49 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
 private val DarkColorScheme = darkColorScheme(
-    primary = InkPrimaryDark,
-    onPrimary = Color.White,
-    primaryContainer = Color(0xFF4A1012),
-    onPrimaryContainer = Color(0xFFFFD6D6),
-    secondary = InkSecondaryDark,
-    onSecondary = Color(0xFF1C1C1E),
-    secondaryContainer = Color(0xFF38383A),
-    onSecondaryContainer = Color(0xFFE5E5EA),
+    primary = OceanBlueDark,
+    onPrimary = Color(0xFF082F49),
+    primaryContainer = Color(0xFF0C4A6E),
+    onPrimaryContainer = Color(0xFFE0F2FE),
+    secondary = OceanSecondaryDark,
+    onSecondary = Color(0xFF0F172A),
+    secondaryContainer = Color(0xFF1E293B),
+    onSecondaryContainer = Color(0xFFF1F5F9),
+    tertiary = Color(0xFF2DD4BF),
+    onTertiary = Color(0xFF134E4A),
+    tertiaryContainer = Color(0xFF115E59),
+    onTertiaryContainer = Color(0xFFCCFBF1),
     background = MidnightBackground,
     surface = MidnightSurface,
     surfaceVariant = MidnightSurfaceVariant,
     onBackground = MidnightTextPrimary,
     onSurface = MidnightTextPrimary,
-    onSurfaceVariant = MidnightTextSecondary
+    onSurfaceVariant = MidnightTextSecondary,
+    outline = Color(0xFF475569),
+    outlineVariant = Color(0xFF334155),
 )
 
 private val LightColorScheme = lightColorScheme(
-    primary = InkPrimary,
+    primary = OceanBlue,
     onPrimary = Color.White,
-    primaryContainer = AdobeRedContainer,
-    onPrimaryContainer = AdobeOnRedContainer,
-    secondary = InkSecondary,
+    primaryContainer = OceanContainer,
+    onPrimaryContainer = OceanOnContainer,
+    secondary = OceanSecondary,
     onSecondary = Color.White,
-    secondaryContainer = Color(0xFFF2F2F7),
-    onSecondaryContainer = Color(0xFF1C1C1E),
+    secondaryContainer = Color(0xFFF0F9FF),
+    onSecondaryContainer = Color(0xFF0369A1),
+    tertiary = Color(0xFF0D9488),
+    onTertiary = Color.White,
+    tertiaryContainer = Color(0xFFCCFBF1),
+    onTertiaryContainer = Color(0xFF115E59),
     background = PaperBackground,
     surface = PaperSurface,
     surfaceVariant = PaperSurfaceVariant,
     onBackground = InkTextPrimary,
     onSurface = InkTextPrimary,
-    onSurfaceVariant = InkTextSecondary
+    onSurfaceVariant = InkTextSecondary,
+    outline = Color(0xFFCBD5E1),
+    outlineVariant = Color(0xFFE2E8F0)
 )
 
 @Composable
