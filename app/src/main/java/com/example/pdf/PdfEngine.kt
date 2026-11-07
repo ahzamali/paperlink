@@ -568,13 +568,14 @@ object PdfEngine {
         isGrayscale: Boolean = false
     ): CompressionEstimate {
         val pages = pageCount.coerceAtLeast(1)
-        val basePdfOverhead = 15 * 1024L
+        val basePdfOverhead = 2 * 1024L
+        val pagePdfOverhead = 350L
         val bytesPerPage = if (isGrayscale) {
             (level.estimatedBytesPerPage * 0.65f).toLong()
         } else {
             level.estimatedBytesPerPage
         }
-        val estimatedOutput = (pages * bytesPerPage) + basePdfOverhead
+        val estimatedOutput = (pages * (bytesPerPage + pagePdfOverhead)) + basePdfOverhead
 
         fun formatBytes(bytes: Long): String {
             if (bytes <= 0) return "0 B"
@@ -707,94 +708,156 @@ object PdfEngine {
         synchronized(rendererLock) {
             val renderer = getOrCreateRenderer(sourceLocation) ?: return@withContext null
             try {
-                val pdfDoc = PdfDocument()
                 val totalPages = renderer.pageCount
+                if (totalPages <= 0) return@withContext null
+
+                destFile.parentFile?.apply { if (!exists()) mkdirs() }
+
                 val targetWidth = level.targetWidth
                 var pagesWritten = 0
 
-                for (pageIdx in 0 until totalPages) {
-                    try {
-                        renderer.openPage(pageIdx).use { page ->
-                            val origW = if (page.width > 0) page.width else 600
-                            val origH = if (page.height > 0) page.height else 850
-                            val scale = targetWidth.toFloat() / origW.toFloat()
-                            val targetHeight = ((origH * scale).toInt()).coerceIn(100, 4096)
+                val totalObjects = 2 + (totalPages * 3)
+                val offsets = LongArray(totalObjects + 1)
+                var currentOffset = 0L
 
-                            // PdfRenderer requires ARGB_8888; render to ARGB_8888 first
-                            val fullBitmap = Bitmap.createBitmap(
-                                targetWidth,
-                                targetHeight,
-                                Bitmap.Config.ARGB_8888
-                            )
-                            val baseCanvas = Canvas(fullBitmap)
-                            baseCanvas.drawColor(Color.WHITE)
-                            page.render(
-                                fullBitmap,
-                                null,
-                                null,
-                                PdfRenderer.Page.RENDER_MODE_FOR_PRINT
-                            )
-
-                            val pageData = allAnnotationsByPage[pageIdx]
-                            if (pageData != null) {
-                                val (strokes, texts) = pageData
-                                drawAnnotationsOnCanvas(baseCanvas, targetWidth, targetHeight, strokes, texts)
-                            }
-
-                            val finalBitmap = if (convertToGrayscale) {
-                                val grayBitmap = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.RGB_565)
-                                val grayCanvas = Canvas(grayBitmap)
-                                val grayPaint = Paint().apply {
-                                    val cm = ColorMatrix().apply { setSaturation(0f) }
-                                    colorFilter = ColorMatrixColorFilter(cm)
-                                }
-                                grayCanvas.drawBitmap(fullBitmap, 0f, 0f, grayPaint)
-                                fullBitmap.recycle()
-                                grayBitmap
-                            } else {
-                                fullBitmap
-                            }
-
-                            val compressedStream = ByteArrayOutputStream()
-                            finalBitmap.compress(Bitmap.CompressFormat.JPEG, level.jpegQuality, compressedStream)
-                            finalBitmap.recycle()
-
-                            val compressedBytes = compressedStream.toByteArray()
-                            val compressedBitmap = android.graphics.BitmapFactory.decodeByteArray(compressedBytes, 0, compressedBytes.size)
-
-                            val pageInfo = PdfDocument.PageInfo.Builder(
-                                origW,
-                                origH,
-                                pageIdx + 1
-                            ).create()
-                            val pdfPage = pdfDoc.startPage(pageInfo)
-                            val canvas = pdfPage.canvas
-
-                            val destRect = RectF(0f, 0f, origW.toFloat(), origH.toFloat())
-                            if (compressedBitmap != null) {
-                                canvas.drawBitmap(compressedBitmap, null, destRect, null)
-                                compressedBitmap.recycle()
-                            }
-
-                            pdfDoc.finishPage(pdfPage)
-                            pagesWritten++
-                        }
-                    } catch (pe: Throwable) {
-                        pe.printStackTrace()
-                    }
-                }
-
-                if (pagesWritten == 0) {
-                    pdfDoc.close()
-                    try { destFile.delete() } catch (_: Throwable) {}
-                    return@withContext null
-                }
-
-                destFile.parentFile?.apply { if (!exists()) mkdirs() }
                 java.io.FileOutputStream(destFile).use { out ->
-                    pdfDoc.writeTo(out)
+                    fun writeStr(str: String) {
+                        val b = str.toByteArray(Charsets.ISO_8859_1)
+                        out.write(b)
+                        currentOffset += b.size
+                    }
+
+                    fun writeBytes(b: ByteArray) {
+                        out.write(b)
+                        currentOffset += b.size
+                    }
+
+                    // PDF Header
+                    writeStr("%PDF-1.4\n%\u00E2\u00E3\u00CF\u00D3\n")
+
+                    // Object 1: Catalog
+                    offsets[1] = currentOffset
+                    writeStr("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n")
+
+                    // Object 2: Pages
+                    offsets[2] = currentOffset
+                    val kids = (0 until totalPages).joinToString(" ") { "${3 + it * 3} 0 R" }
+                    writeStr("2 0 obj\n<< /Type /Pages /Kids [$kids] /Count $totalPages >>\nendobj\n")
+
+                    for (pageIdx in 0 until totalPages) {
+                        try {
+                            renderer.openPage(pageIdx).use { page ->
+                                val origW = if (page.width > 0) page.width else 600
+                                val origH = if (page.height > 0) page.height else 850
+                                val scale = targetWidth.toFloat() / origW.toFloat()
+                                val targetHeight = ((origH * scale).toInt()).coerceIn(100, 4096)
+
+                                // Render page cleanly with ARGB_8888 (required by PdfRenderer)
+                                val fullBitmap = Bitmap.createBitmap(
+                                    targetWidth,
+                                    targetHeight,
+                                    Bitmap.Config.ARGB_8888
+                                )
+                                val baseCanvas = Canvas(fullBitmap)
+                                baseCanvas.drawColor(Color.WHITE)
+                                page.render(
+                                    fullBitmap,
+                                    null,
+                                    null,
+                                    PdfRenderer.Page.RENDER_MODE_FOR_PRINT
+                                )
+
+                                val pageData = allAnnotationsByPage[pageIdx]
+                                if (pageData != null) {
+                                    val (strokes, texts) = pageData
+                                    drawAnnotationsOnCanvas(baseCanvas, targetWidth, targetHeight, strokes, texts)
+                                }
+
+                                val finalBitmap = if (convertToGrayscale) {
+                                    val grayBitmap = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.RGB_565)
+                                    val grayCanvas = Canvas(grayBitmap)
+                                    val grayPaint = Paint().apply {
+                                        val cm = ColorMatrix().apply { setSaturation(0f) }
+                                        colorFilter = ColorMatrixColorFilter(cm)
+                                    }
+                                    grayCanvas.drawBitmap(fullBitmap, 0f, 0f, grayPaint)
+                                    fullBitmap.recycle()
+                                    grayBitmap
+                                } else {
+                                    fullBitmap
+                                }
+
+                                val compressedStream = ByteArrayOutputStream()
+                                finalBitmap.compress(Bitmap.CompressFormat.JPEG, level.jpegQuality, compressedStream)
+                                finalBitmap.recycle()
+
+                                val jpegBytes = compressedStream.toByteArray()
+                                val colorSpace = if (convertToGrayscale) {
+                                    determineJpegColorSpace(jpegBytes)
+                                } else {
+                                    "/DeviceRGB"
+                                }
+
+                                val pageObjId = 3 + pageIdx * 3
+                                val imageObjId = pageObjId + 1
+                                val contentObjId = pageObjId + 2
+
+                                // Page Object
+                                offsets[pageObjId] = currentOffset
+                                writeStr(
+                                    "$pageObjId 0 obj\n" +
+                                    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 $origW $origH] " +
+                                    "/Resources << /XObject << /Im$pageIdx $imageObjId 0 R >> >> " +
+                                    "/Contents $contentObjId 0 R >>\nendobj\n"
+                                )
+
+                                // Image XObject with direct /Filter /DCTDecode (eliminates Skia FlateDecode bloat)
+                                offsets[imageObjId] = currentOffset
+                                writeStr(
+                                    "$imageObjId 0 obj\n" +
+                                    "<< /Type /XObject /Subtype /Image /Width $targetWidth /Height $targetHeight " +
+                                    "/ColorSpace $colorSpace /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpegBytes.size} >>\n" +
+                                    "stream\n"
+                                )
+                                writeBytes(jpegBytes)
+                                writeStr("\nendstream\nendobj\n")
+
+                                // Content Stream
+                                offsets[contentObjId] = currentOffset
+                                val contentStream = "q\n$origW 0 0 $origH 0 0 cm\n/Im$pageIdx Do\nQ\n"
+                                writeStr(
+                                    "$contentObjId 0 obj\n" +
+                                    "<< /Length ${contentStream.length} >>\n" +
+                                    "stream\n$contentStream\nendstream\nendobj\n"
+                                )
+
+                                pagesWritten++
+                            }
+                        } catch (pe: Throwable) {
+                            pe.printStackTrace()
+                        }
+                    }
+
+                    if (pagesWritten == 0) {
+                        try { destFile.delete() } catch (_: Throwable) {}
+                        return@withContext null
+                    }
+
+                    // Xref table
+                    val xrefOffset = currentOffset
+                    writeStr("xref\n0 ${totalObjects + 1}\n0000000000 65535 f \n")
+                    for (i in 1..totalObjects) {
+                        writeStr(String.format(java.util.Locale.US, "%010d 00000 n \n", offsets[i]))
+                    }
+
+                    // Trailer
+                    writeStr(
+                        "trailer\n" +
+                        "<< /Size ${totalObjects + 1} /Root 1 0 R >>\n" +
+                        "startxref\n$xrefOffset\n%%EOF\n"
+                    )
+                    out.flush()
                 }
-                pdfDoc.close()
 
                 val compressedSize = destFile.length()
                 val isLarger = compressedSize > originalSize && originalSize > 0
@@ -827,6 +890,32 @@ object PdfEngine {
                 null
             }
         }
+    }
+
+    private fun determineJpegColorSpace(jpegBytes: ByteArray): String {
+        var i = 0
+        while (i < jpegBytes.size - 9) {
+            if (jpegBytes[i] == 0xFF.toByte()) {
+                val marker = jpegBytes[i + 1].toInt() and 0xFF
+                if (marker == 0xC0 || marker == 0xC1 || marker == 0xC2) {
+                    val components = jpegBytes[i + 9].toInt() and 0xFF
+                    return if (components == 1) "/DeviceGray" else "/DeviceRGB"
+                }
+                if (marker != 0x00 && marker != 0xFF) {
+                    if (marker == 0xD8 || marker == 0xD9) {
+                        i += 2
+                        continue
+                    }
+                    if (i + 3 < jpegBytes.size) {
+                        val len = ((jpegBytes[i + 2].toInt() and 0xFF) shl 8) or (jpegBytes[i + 3].toInt() and 0xFF)
+                        i += 2 + len
+                        continue
+                    }
+                }
+            }
+            i++
+        }
+        return "/DeviceRGB"
     }
 
     /**

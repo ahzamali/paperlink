@@ -610,6 +610,97 @@ class ExampleRobolectricTest {
       }
     }
   }
+
+  @Test
+  fun `compressed PDF output uses DCTDecode filter for high compression ratio without Skia FlateDecode bloat`() = kotlinx.coroutines.test.runTest {
+    val context = org.robolectric.RuntimeEnvironment.getApplication()
+    com.example.pdf.PdfEngine.init(context)
+
+    val sourcePdfFile = java.io.File.createTempFile("test_dct_src", ".pdf")
+    val destPdfFile = java.io.File.createTempFile("test_dct_out", ".pdf")
+
+    try {
+      // Build a 2-page source PDF
+      val doc = android.graphics.pdf.PdfDocument()
+      for (i in 1..2) {
+        val page = doc.startPage(android.graphics.pdf.PdfDocument.PageInfo.Builder(600, 800, i).create())
+        page.canvas.drawColor(android.graphics.Color.WHITE)
+        val paint = android.graphics.Paint().apply { color = android.graphics.Color.BLUE; textSize = 28f }
+        page.canvas.drawText("DCT Test Page $i", 50f, 100f, paint)
+        doc.finishPage(page)
+      }
+      java.io.FileOutputStream(sourcePdfFile).use { doc.writeTo(it) }
+      doc.close()
+
+      val result = com.example.pdf.PdfEngine.compressPdf(
+          sourceLocation = sourcePdfFile.absolutePath,
+          destFile = destPdfFile,
+          level = com.example.data.model.CompressionLevel.HIGH,
+          convertToGrayscale = false,
+          revertIfLarger = false
+      )
+
+      org.junit.Assert.assertNotNull(result)
+      assertTrue(destPdfFile.exists() && destPdfFile.length() > 0L)
+
+      val outputText = String(destPdfFile.readBytes(), Charsets.ISO_8859_1)
+      // Must use /Filter /DCTDecode for images, NOT /Filter /FlateDecode from Skia
+      assertTrue("PDF must contain /Filter /DCTDecode for JPEG image compression: $outputText", outputText.contains("/Filter /DCTDecode"))
+      org.junit.Assert.assertFalse("PDF should not use /Filter /FlateDecode for raster images: $outputText", outputText.contains("/Filter /FlateDecode"))
+      assertTrue("PDF must have /Type /Catalog", outputText.contains("/Type /Catalog"))
+      assertTrue("PDF must have /Type /Pages", outputText.contains("/Type /Pages"))
+      assertTrue("PDF must have /Count 2", outputText.contains("/Count 2"))
+
+      // Verified via PdfRenderer
+      val renderer = android.graphics.pdf.PdfRenderer(
+          android.os.ParcelFileDescriptor.open(destPdfFile, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
+      )
+      assertEquals(2, renderer.pageCount)
+      renderer.close()
+    } finally {
+      sourcePdfFile.delete()
+      destPdfFile.delete()
+    }
+  }
+
+  @Test
+  fun `compressed PDF grayscale mode uses DeviceGray colorspace and DCTDecode`() = kotlinx.coroutines.test.runTest {
+    val context = org.robolectric.RuntimeEnvironment.getApplication()
+    com.example.pdf.PdfEngine.init(context)
+
+    val sourcePdfFile = java.io.File.createTempFile("test_gray_src", ".pdf")
+    val destPdfFile = java.io.File.createTempFile("test_gray_out", ".pdf")
+
+    try {
+      val doc = android.graphics.pdf.PdfDocument()
+      val page = doc.startPage(android.graphics.pdf.PdfDocument.PageInfo.Builder(600, 800, 1).create())
+      page.canvas.drawColor(android.graphics.Color.WHITE)
+      val paint = android.graphics.Paint().apply { color = android.graphics.Color.RED; textSize = 28f }
+      page.canvas.drawText("Grayscale DCT Test", 50f, 100f, paint)
+      doc.finishPage(page)
+      java.io.FileOutputStream(sourcePdfFile).use { doc.writeTo(it) }
+      doc.close()
+
+      val result = com.example.pdf.PdfEngine.compressPdf(
+          sourceLocation = sourcePdfFile.absolutePath,
+          destFile = destPdfFile,
+          level = com.example.data.model.CompressionLevel.HIGH,
+          convertToGrayscale = true,
+          revertIfLarger = false
+      )
+
+      org.junit.Assert.assertNotNull(result)
+      assertTrue(result?.isGrayscale == true)
+
+      val outputText = String(destPdfFile.readBytes(), Charsets.ISO_8859_1)
+      assertTrue("Must contain valid color space", outputText.contains("/ColorSpace /DeviceRGB") || outputText.contains("/ColorSpace /DeviceGray"))
+      assertTrue("Must contain /Filter /DCTDecode", outputText.contains("/Filter /DCTDecode"))
+    } finally {
+      sourcePdfFile.delete()
+      destPdfFile.delete()
+    }
+  }
 }
+
 
 

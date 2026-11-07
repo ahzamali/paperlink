@@ -84,8 +84,10 @@ class ShadowPdfRenderer {
             channel.position(0)
             if (bytesRead > 0) {
                 val text = String(buf.array(), 0, bytesRead, Charsets.UTF_8)
-                val match = Regex("(\\d+)\\s+pages").find(text)
-                pageCount = match?.groupValues?.get(1)?.toIntOrNull() ?: 1
+                val match = Regex("/Count\\s+(\\d+)|(\\d+)\\s+pages").find(text)
+                pageCount = match?.groupValues?.get(1)?.toIntOrNull()
+                    ?: match?.groupValues?.get(2)?.toIntOrNull()
+                    ?: 1
             } else {
                 pageCount = 1
             }
