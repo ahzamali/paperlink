@@ -25,3 +25,7 @@ app/google-services.json
 # Release keystore files
 *.jks
 my-upload-key.jks
+
+# Local sample PDFs for testing
+/samples/
+

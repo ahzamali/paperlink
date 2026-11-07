@@ -395,6 +395,10 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
             try {
                 val context = getApplication<Application>()
                 val doc = _compressingDoc.value
+                if (!result.outputFile.exists() || result.outputFile.length() == 0L) {
+                    _userMessage.value = "Compressed file is empty or missing"
+                    return@launch
+                }
                 val exportsDir = File(context.filesDir, "exports").apply { if (!exists()) mkdirs() }
                 val exportFile = File(exportsDir, result.outputFile.name)
                 result.outputFile.copyTo(exportFile, overwrite = true)

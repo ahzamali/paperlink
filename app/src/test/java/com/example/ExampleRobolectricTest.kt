@@ -20,7 +20,14 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34])
+@Config(
+    sdk = [34],
+    shadows = [
+        com.example.testing.ShadowPdfDocument::class,
+        com.example.testing.ShadowPdfRenderer::class,
+        com.example.testing.ShadowPdfRendererPage::class
+    ]
+)
 class ExampleRobolectricTest {
 
   private lateinit var db: PaperInkDatabase
@@ -432,5 +439,177 @@ class ExampleRobolectricTest {
       testFile.delete()
     }
   }
+
+  @Test
+  fun `real PDF compression produces non-empty valid PDF file with both color and grayscale`() = kotlinx.coroutines.test.runTest {
+    val context = org.robolectric.RuntimeEnvironment.getApplication()
+    com.example.pdf.PdfEngine.init(context)
+
+    // Generate a valid real PDF file with Android's PdfDocument
+    val sourcePdfFile = java.io.File.createTempFile("real_source_doc", ".pdf")
+    val compressedColorFile = java.io.File.createTempFile("real_compressed_color", ".pdf")
+    val compressedGrayscaleFile = java.io.File.createTempFile("real_compressed_gray", ".pdf")
+
+    try {
+      val doc = android.graphics.pdf.PdfDocument()
+      for (pageIdx in 1..2) {
+        val pageInfo = android.graphics.pdf.PdfDocument.PageInfo.Builder(612, 792, pageIdx).create()
+        val page = doc.startPage(pageInfo)
+        val canvas = page.canvas
+        canvas.drawColor(android.graphics.Color.WHITE)
+
+        val paint = android.graphics.Paint().apply {
+          color = if (pageIdx == 1) android.graphics.Color.BLUE else android.graphics.Color.RED
+          textSize = 32f
+          isAntiAlias = true
+        }
+        canvas.drawText("Test Real PDF Document - Page $pageIdx", 50f, 150f, paint)
+
+        val rectPaint = android.graphics.Paint().apply {
+          color = android.graphics.Color.GREEN
+        }
+        canvas.drawRect(50f, 200f, 350f, 400f, rectPaint)
+        doc.finishPage(page)
+      }
+      java.io.FileOutputStream(sourcePdfFile).use { out ->
+        doc.writeTo(out)
+      }
+      doc.close()
+
+      assertTrue("Source PDF must exist and be non-empty", sourcePdfFile.exists() && sourcePdfFile.length() > 0L)
+
+      // Test 1: Color Compression
+      val colorResult = com.example.pdf.PdfEngine.compressPdf(
+          sourceLocation = sourcePdfFile.absolutePath,
+          destFile = compressedColorFile,
+          level = com.example.data.model.CompressionLevel.HIGH,
+          convertToGrayscale = false,
+          revertIfLarger = false
+      )
+
+      org.junit.Assert.assertNotNull("Color compression result should not be null", colorResult)
+      assertTrue("Compressed color file must exist", compressedColorFile.exists())
+      assertTrue("Compressed color file must be > 0 bytes (actual: ${compressedColorFile.length()})", compressedColorFile.length() > 0L)
+      assertEquals("Output file in result must match destFile", compressedColorFile.absolutePath, colorResult?.outputFile?.absolutePath)
+      assertEquals("Compressed size in result must match actual file size", compressedColorFile.length(), colorResult?.compressedSizeBytes)
+
+      // Test 2: Grayscale Compression
+      val grayResult = com.example.pdf.PdfEngine.compressPdf(
+          sourceLocation = sourcePdfFile.absolutePath,
+          destFile = compressedGrayscaleFile,
+          level = com.example.data.model.CompressionLevel.HIGH,
+          convertToGrayscale = true,
+          revertIfLarger = false
+      )
+
+      org.junit.Assert.assertNotNull("Grayscale compression result should not be null", grayResult)
+      assertTrue("Compressed grayscale file must exist", compressedGrayscaleFile.exists())
+      assertTrue("Compressed grayscale file must be > 0 bytes (actual: ${compressedGrayscaleFile.length()})", compressedGrayscaleFile.length() > 0L)
+      assertTrue("Result must reflect grayscale flag", grayResult?.isGrayscale == true)
+
+      // Verify that both outputs can be opened and parsed as valid PDFs
+      val colorRenderer = android.graphics.pdf.PdfRenderer(
+          android.os.ParcelFileDescriptor.open(compressedColorFile, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
+      )
+      assertEquals(2, colorRenderer.pageCount)
+      colorRenderer.close()
+
+      val grayRenderer = android.graphics.pdf.PdfRenderer(
+          android.os.ParcelFileDescriptor.open(compressedGrayscaleFile, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
+      )
+      assertEquals(2, grayRenderer.pageCount)
+      grayRenderer.close()
+
+    } finally {
+      sourcePdfFile.delete()
+      compressedColorFile.delete()
+      compressedGrayscaleFile.delete()
+    }
+  }
+
+  @Test
+  fun `real PDF merging produces valid non-empty PDF file with all pages combined`() = kotlinx.coroutines.test.runTest {
+    val context = org.robolectric.RuntimeEnvironment.getApplication()
+    com.example.pdf.PdfEngine.init(context)
+
+    val doc1File = java.io.File.createTempFile("real_doc1", ".pdf")
+    val doc2File = java.io.File.createTempFile("real_doc2", ".pdf")
+    val mergedOutputFile = java.io.File.createTempFile("real_merged_out", ".pdf")
+
+    try {
+      // Build Doc 1 (1 page)
+      val doc1 = android.graphics.pdf.PdfDocument()
+      val p1 = doc1.startPage(android.graphics.pdf.PdfDocument.PageInfo.Builder(600, 800, 1).create())
+      p1.canvas.drawColor(android.graphics.Color.WHITE)
+      val paint = android.graphics.Paint().apply { color = android.graphics.Color.BLACK; textSize = 24f }
+      p1.canvas.drawText("Document 1 Page 1", 50f, 100f, paint)
+      doc1.finishPage(p1)
+      java.io.FileOutputStream(doc1File).use { doc1.writeTo(it) }
+      doc1.close()
+
+      // Build Doc 2 (2 pages)
+      val doc2 = android.graphics.pdf.PdfDocument()
+      for (i in 1..2) {
+        val p = doc2.startPage(android.graphics.pdf.PdfDocument.PageInfo.Builder(600, 800, i).create())
+        p.canvas.drawColor(android.graphics.Color.WHITE)
+        p.canvas.drawText("Document 2 Page $i", 50f, 100f, paint)
+        doc2.finishPage(p)
+      }
+      java.io.FileOutputStream(doc2File).use { doc2.writeTo(it) }
+      doc2.close()
+
+      val mergeResult = com.example.pdf.PdfEngine.mergePdfs(
+          sourceLocations = listOf(doc1File.absolutePath, doc2File.absolutePath),
+          destFile = mergedOutputFile
+      )
+
+      org.junit.Assert.assertNotNull("Merge result should not be null", mergeResult)
+      assertTrue("Merged output file must exist", mergedOutputFile.exists())
+      assertTrue("Merged output file must be > 0 bytes (actual: ${mergedOutputFile.length()})", mergedOutputFile.length() > 0L)
+      assertEquals("Merged document must contain 3 total pages", 3, mergeResult?.totalPageCount)
+      assertEquals("Merged source count must be 2", 2, mergeResult?.mergedSourceCount)
+
+      // Verify merged file opens cleanly in PdfRenderer
+      val mergedRenderer = android.graphics.pdf.PdfRenderer(
+          android.os.ParcelFileDescriptor.open(mergedOutputFile, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
+      )
+      assertEquals(3, mergedRenderer.pageCount)
+      mergedRenderer.close()
+    } finally {
+      doc1File.delete()
+      doc2File.delete()
+      mergedOutputFile.delete()
+    }
+  }
+
+  @Test
+  fun `real PDF compression on local samples directory if present`() = kotlinx.coroutines.test.runTest {
+    val samplesDir = java.io.File("samples")
+    if (!samplesDir.exists() || !samplesDir.isDirectory) return@runTest
+    val pdfFiles = samplesDir.listFiles { f -> f.extension.equals("pdf", ignoreCase = true) } ?: return@runTest
+    if (pdfFiles.isEmpty()) return@runTest
+
+    val context = org.robolectric.RuntimeEnvironment.getApplication()
+    com.example.pdf.PdfEngine.init(context)
+
+    for (sample in pdfFiles.take(2)) {
+      val tempOut = java.io.File.createTempFile("sample_compressed_", ".pdf")
+      try {
+        val result = com.example.pdf.PdfEngine.compressPdf(
+            sourceLocation = sample.absolutePath,
+            destFile = tempOut,
+            level = com.example.data.model.CompressionLevel.HIGH,
+            convertToGrayscale = false,
+            revertIfLarger = false
+        )
+        org.junit.Assert.assertNotNull("Compression of sample ${sample.name} should succeed", result)
+        assertTrue("Compressed sample ${sample.name} should exist", tempOut.exists())
+        assertTrue("Compressed sample ${sample.name} should be > 0 bytes (actual: ${tempOut.length()})", tempOut.length() > 0L)
+      } finally {
+        tempOut.delete()
+      }
+    }
+  }
 }
+
 

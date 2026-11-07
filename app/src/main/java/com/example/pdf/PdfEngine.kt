@@ -640,7 +640,7 @@ object PdfEngine {
                     val scale = level.targetWidth.toFloat() / origW.toFloat()
                     val targetHeight = ((origH * scale).toInt()).coerceIn(100, 4096)
 
-                    val bmp = Bitmap.createBitmap(level.targetWidth, targetHeight, Bitmap.Config.RGB_565)
+                    val bmp = Bitmap.createBitmap(level.targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
                     val canvas = Canvas(bmp)
                     canvas.drawColor(Color.WHITE)
                     page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
@@ -710,6 +710,7 @@ object PdfEngine {
                 val pdfDoc = PdfDocument()
                 val totalPages = renderer.pageCount
                 val targetWidth = level.targetWidth
+                var pagesWritten = 0
 
                 for (pageIdx in 0 until totalPages) {
                     try {
@@ -719,11 +720,11 @@ object PdfEngine {
                             val scale = targetWidth.toFloat() / origW.toFloat()
                             val targetHeight = ((origH * scale).toInt()).coerceIn(100, 4096)
 
-                            // Use RGB_565 to cut memory footprint in half (2 bytes/pixel vs 4) and prevent OOM
+                            // PdfRenderer requires ARGB_8888; render to ARGB_8888 first
                             val fullBitmap = Bitmap.createBitmap(
                                 targetWidth,
                                 targetHeight,
-                                Bitmap.Config.RGB_565
+                                Bitmap.Config.ARGB_8888
                             )
                             val baseCanvas = Canvas(fullBitmap)
                             baseCanvas.drawColor(Color.WHITE)
@@ -776,10 +777,17 @@ object PdfEngine {
                             }
 
                             pdfDoc.finishPage(pdfPage)
+                            pagesWritten++
                         }
                     } catch (pe: Throwable) {
                         pe.printStackTrace()
                     }
+                }
+
+                if (pagesWritten == 0) {
+                    pdfDoc.close()
+                    try { destFile.delete() } catch (_: Throwable) {}
+                    return@withContext null
                 }
 
                 destFile.parentFile?.apply { if (!exists()) mkdirs() }
@@ -861,16 +869,17 @@ object PdfEngine {
                                             val pdfPage = pdfDoc.startPage(pageInfo)
                                             val canvas = pdfPage.canvas
 
-                                            // Render at crisp resolution preserving aspect ratio, using memory-efficient RGB_565 (50% RAM savings)
+                                            // Calculate crisp resolution preserving aspect ratio
                                             val maxDim = maxOf(origW, origH).toFloat()
                                             val scale = (1400f / maxDim).coerceIn(1.0f, 2.5f)
                                             val renderW = ((origW * scale).toInt()).coerceIn(100, 4096)
                                             val renderH = ((origH * scale).toInt()).coerceIn(100, 4096)
 
+                                            // PdfRenderer requires ARGB_8888; render to ARGB_8888 first
                                             val bitmap = Bitmap.createBitmap(
                                                 renderW,
                                                 renderH,
-                                                Bitmap.Config.RGB_565
+                                                Bitmap.Config.ARGB_8888
                                             )
                                             try {
                                                 val bCanvas = Canvas(bitmap)

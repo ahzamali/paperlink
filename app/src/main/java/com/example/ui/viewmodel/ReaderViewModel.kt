@@ -825,6 +825,10 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
             try {
                 val context = getApplication<Application>()
                 val doc = _uiState.value.document
+                if (!result.outputFile.exists() || result.outputFile.length() == 0L) {
+                    _uiState.update { it.copy(userMessage = "Compressed file is empty or missing") }
+                    return@launch
+                }
                 val exportsDir = File(context.filesDir, "exports").apply { if (!exists()) mkdirs() }
                 val exportFile = File(exportsDir, result.outputFile.name)
                 result.outputFile.copyTo(exportFile, overwrite = true)
