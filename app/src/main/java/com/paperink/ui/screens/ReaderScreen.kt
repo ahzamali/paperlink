@@ -168,7 +168,11 @@ fun ReaderScreen(
     val coroutineScope = rememberCoroutineScope()
 
     BackHandler {
-        onBack()
+        if (uiState.showAiAssistant) {
+            viewModel.closeAiAssistant()
+        } else {
+            onBack()
+        }
     }
 
     LaunchedEffect(uiState.userMessage) {

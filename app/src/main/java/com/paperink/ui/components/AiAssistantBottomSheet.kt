@@ -47,9 +47,22 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.SheetState
 import androidx.compose.material3.Surface
+import android.view.View
+import android.view.WindowManager
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.ModalBottomSheetDefaults
+import androidx.compose.material3.ModalBottomSheetProperties
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -61,10 +74,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.DialogWindowProvider
 import com.paperink.ai.AiAssistantViewModel
 import com.paperink.ai.ContextScopeMode
 import com.paperink.ai.AiModelManager
@@ -85,9 +103,20 @@ fun AiAssistantBottomSheet(
     var inputText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
 
+    val isImeVisible = WindowInsets.isImeVisible
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+
     // Scroll to bottom when new messages arrive
     LaunchedEffect(state.messages.size, state.messages.lastOrNull()?.text?.length) {
         if (state.messages.isNotEmpty()) {
+            listState.animateScrollToItem(state.messages.lastIndex)
+        }
+    }
+
+    // Scroll to bottom when keyboard opens to ensure latest message is visible
+    LaunchedEffect(isImeVisible) {
+        if (isImeVisible && state.messages.isNotEmpty()) {
             listState.animateScrollToItem(state.messages.lastIndex)
         }
     }
@@ -96,13 +125,41 @@ fun AiAssistantBottomSheet(
         onDismissRequest = onDismissRequest,
         sheetState = sheetState,
         containerColor = MaterialTheme.colorScheme.surface,
-        dragHandle = null
+        dragHandle = null,
+        properties = ModalBottomSheetProperties(
+            shouldDismissOnBackPress = !isImeVisible
+        ),
+        contentWindowInsets = { WindowInsets(0, 0, 0, 0) }
     ) {
+        // Ensure dialog window resizes dynamically when keyboard opens
+        val view = LocalView.current
+        @Suppress("DEPRECATION")
+        DisposableEffect(view) {
+            var parentView: View? = view
+            while (parentView != null) {
+                if (parentView is DialogWindowProvider) {
+                    parentView.window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+                    break
+                }
+                parentView = parentView.parent as? View
+            }
+            onDispose {}
+        }
+
+        // When soft keyboard is visible, intercept back / down gesture to dismiss keyboard first
+        BackHandler(enabled = isImeVisible) {
+            keyboardController?.hide()
+            focusManager.clearFocus()
+        }
+
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.85f)
-                .padding(bottom = 16.dp)
+                .fillMaxHeight(if (isImeVisible) 1f else 0.85f)
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .imePadding()
+                .padding(bottom = 8.dp)
         ) {
             // Header
             Row(
@@ -476,6 +533,18 @@ fun AiAssistantBottomSheet(
                                 modifier = Modifier.weight(1f),
                                 maxLines = 4,
                                 shape = RoundedCornerShape(24.dp),
+                                keyboardOptions = KeyboardOptions(
+                                    imeAction = if (inputText.isNotBlank() && state.isEngineReady && !state.isBusy) ImeAction.Send else ImeAction.Default
+                                ),
+                                keyboardActions = KeyboardActions(
+                                    onSend = {
+                                        val q = inputText.trim()
+                                        if (q.isNotBlank() && state.isEngineReady && !state.isBusy) {
+                                            viewModel.askQuestion(q)
+                                            inputText = ""
+                                        }
+                                    }
+                                ),
                                 colors = OutlinedTextFieldDefaults.colors(
                                     focusedBorderColor = OceanBlue,
                                     unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
