@@ -1,16 +1,39 @@
 # PaperInk PDF (Paperlink)
 
+[![Release](https://img.shields.io/badge/Release-v2.0.1--beta-orange.svg)](https://github.com/ahzamali/paperlink/releases)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Android%208.0%2B%20(API%2026%2B)-green.svg)](https://developer.android.com)
 [![Target SDK](https://img.shields.io/badge/Target%20SDK-36%20(Android%2015)-brightgreen.svg)](https://developer.android.com/about/versions/15)
+[![On-Device AI](https://img.shields.io/badge/AI-Gemma%204%202B%20(LiteRT--LM)-9cf.svg)](https://github.com/google-ai-edge/litert-lm)
+[![On-Device OCR](https://img.shields.io/badge/OCR-Google%20ML%20Kit-ff69b4.svg)](https://developers.google.com/ml-kit)
 [![Language](https://img.shields.io/badge/Kotlin-2.0.21-purple.svg)](https://kotlinlang.org)
 [![Jetpack Compose](https://img.shields.io/badge/UI-Jetpack%20Compose%20%2F%20Material%203-4285F4.svg)](https://developer.android.com/jetpack/compose)
 
-A modern, fast, privacy-focused Android PDF reader, annotator, and organizer crafted with **Kotlin** and **Jetpack Compose (Material 3)**. Styled with an Adobe Acrobat-inspired red-and-white aesthetic, PaperInk PDF brings continuous vertical rendering, fluid multi-touch gestures, offline document organization, secure password protection handling, and in-place annotation flattening to mobile devices.
+A modern, fast, privacy-focused Android PDF reader, annotator, and organizer crafted with **Kotlin** and **Jetpack Compose (Material 3)**. Styled with an Adobe Acrobat-inspired red-and-white aesthetic, PaperInk PDF brings continuous vertical rendering, fluid multi-touch gestures, offline document organization, secure password protection handling, in-place annotation flattening, **on-device OCR**, and **local LLM intelligence powered by Gemma 4 2B** to mobile devices.
 
 ---
 
 ## Highlights & Features
+
+### 🤖 On-Device AI Assistant (Gemma 4 2B)
+- **100% Private, Local LLM**: Powered by Google Gemma 4 2B (`gemma-4-E2B-it.litertlm`) via Google's official `litertlm-android` Kotlin API. No prompts or document contents are ever transmitted to any cloud servers.
+- **Hardware-Accelerated Inference**: Automatic GPU shader acceleration via OpenCL with seamless fallback to multi-threaded CPU inference.
+- **Document Context Ingestion**: Automatically extracts and injects up to 24,000 characters of in-document text and OCR output into Gemma's prompt window for context-grounded, factual answers.
+- **Instant Document Intelligence**:
+  - 📄 **Summarize PDF**: Generates structured summaries with key takeaways and bullet points.
+  - 🔑 **Key Takeaways**: Extracts core insights, themes, and conclusions.
+  - 📋 **Action Items**: Identifies actionable tasks, deadlines, and recommendations.
+  - 💬 **Interactive Q&A**: Multi-turn conversational chat with real-time token-by-token streaming and one-tap copy-to-clipboard.
+- **Model Manager**: In-app download manager for `gemma-4-E2B-it.litertlm` (~2.6 GB) with byte counters, background download resumption, scoped storage compatibility, and support for ADB side-loaded models.
+- **Always-Accessible AI FAB**: Quick-launch floating assistant available across all pages in the reader, designed with Nordic Ocean styling.
+
+### 🔍 On-Device OCR & Searchable PDF Creation
+- **100% Offline ML Kit Recognition**: Executes Latin script text recognition on-device with Google ML Kit with zero cloud dependency.
+- **Automatic Scanned Document Detection**: Intelligently identifies image-based or scanned PDFs when embedded text streams are empty or sparse, automatically prompting the user with an actionable banner.
+- **Full-Text In-Document Search for Scanned Files**: Maps extracted words with normalized bounding boxes (`0f..1f`), enabling real-time keyword search match highlighting across scanned contracts, books, receipts, and invoices.
+- **Export to Searchable PDF**: Compiles scanned image documents into standardized text-based PDFs with an invisible text layer, making them universally selectable and searchable in any PDF viewer.
+- **Persistent Room Cache**: Uses Room database (`v3`) with `ocr_text_cache` and cascade delete so scans execute once and persist permanently across sessions.
+- **50% Memory Reduction**: Optimized rendering pipeline allocating base image canvases in `RGB_565` for minimal memory overhead during OCR processing.
 
 ### 📖 High-Performance Document Viewer
 - **Continuous Vertical Scrolling**: Seamless page-to-page reading with asynchronous, memory-managed page rendering.
@@ -41,7 +64,7 @@ A modern, fast, privacy-focused Android PDF reader, annotator, and organizer cra
 - **PDF Flattening ("Save")**: Direct Android canvas flattening that permanently burns drawing strokes and notes into the PDF binary so annotations render across all third-party PDF viewers.
 
 ### 🔍 In-Document Search
-- Search plain text, bookmarks, and user-created sticky notes across all pages.
+- Search plain text, bookmarks, user-created sticky notes, and OCR-recognized text across all pages.
 - Jump-to-match navigation with highlighted match indicators and search result counters.
 
 ### 🗜️ PDF Compression Presets
@@ -78,10 +101,12 @@ PaperInk PDF follows modern Android architectural recommendations (Unidirectiona
 
 - **Language**: [Kotlin](https://kotlinlang.org/) (2.0.21)
 - **UI Framework**: [Jetpack Compose](https://developer.android.com/jetpack/compose) with [Material 3](https://m3.material.io/)
+- **On-Device LLM**: [Google LiteRT-LM](https://github.com/google-ai-edge/litert-lm) (`com.google.ai.edge.litertlm:litertlm-android:0.18.0`) running Gemma 4 2B with GPU shader acceleration
+- **On-Device OCR**: [Google ML Kit Text Recognition](https://developers.google.com/ml-kit/vision/text-recognition/v2) (Latin script)
 - **PDF Core**: Android native [PdfRenderer](https://developer.android.com/reference/android/graphics/pdf/PdfRenderer) (enhanced with Android 15 SDK 36 APIs)
-- **Database & Cache**: [Room Persistence Library](https://developer.android.com/training/data-storage/room)
+- **Database & Cache**: [Room Persistence Library](https://developer.android.com/training/data-storage/room) (v3 with OCR text cache and cascade delete)
 - **Concurrency**: Kotlin Coroutines & `StateFlow`
-- **Testing**: [Robolectric](https://robolectric.org/) + [JUnit 4](https://junit.org/junit4/)
+- **Testing**: [Robolectric](https://robolectric.org/) + [JUnit 4](https://junit.org/junit4/) (36 passing automated tests)
 
 ---
 
@@ -96,18 +121,19 @@ paperink-pdf/
 ├── app/
 │   ├── src/
 │   │   ├── main/
-│   │   │   ├── java/com/example/
-│   │   │   │   ├── data/          # Room DB, entities, DAOs, DocumentRepository
-│   │   │   │   ├── pdf/           # PdfEngine (rendering, encryption detection, compression, printing)
+│   │   │   ├── java/com/paperink/
+│   │   │   │   ├── ai/            # Gemma 4 2B LiteRT-LM Engine, ModelManager, AiAssistantViewModel
+│   │   │   │   ├── data/          # Room DB (v3), OcrCacheEntity, DAOs, DocumentRepository
+│   │   │   │   ├── pdf/           # PdfEngine (rendering, OCR integration, searchable PDF export)
 │   │   │   │   ├── ui/
-│   │   │   │   │   ├── components/# PasswordPromptDialog, AnnotationToolbar, CompressDialog, etc.
+│   │   │   │   │   ├── components/# AiAssistantBottomSheet, OcrBannerCard, AnnotationToolbar, etc.
 │   │   │   │   │   ├── screens/   # ReaderScreen, LibraryScreen
-│   │   │   │   │   ├── theme/     # Material 3 Acrobat red-and-white color schemes & typography
-│   │   │   │   │   └── viewmodel/ # ReaderViewModel, LibraryViewModel
+│   │   │   │   │   ├── theme/     # Material 3 Acrobat red-and-white & Nordic Ocean palettes
+│   │   │   │   │   └── viewmodel/ # ReaderViewModel, LibraryViewModel, AiAssistantViewModel
 │   │   │   │   └── MainActivity.kt# Edge-to-edge entry point
 │   │   │   ├── res/               # Vector icons, themes, strings, XML resources
 │   │   │   └── AndroidManifest.xml
-│   │   └── test/                  # Robolectric unit tests (PdfEngine, protection, models)
+│   │   └── test/                  # Robolectric unit tests (PdfEngine, OCR, AI Assistant, Room DB)
 │   ├── build.gradle.kts           # Module-level Gradle configuration
 │   └── google-services.json       # Firebase services configuration (optional/local)
 ├── gradle/
@@ -180,14 +206,14 @@ PaperInk PDF comes with fully configured GitHub Actions workflows:
    - Compiles the debug APK and uploads it as an artifact (`paperlink-debug-apk`).
 
 2. **Automated Releases (`.github/workflows/release.yml`)**:
-   - Triggers whenever a version tag matching `v*` (e.g. `v1.0.2-beta`) is pushed to GitHub.
+   - Triggers whenever a version tag matching `v*` (e.g. `v2.0.1-beta`) is pushed to GitHub.
    - Compiles the APK and publishes it directly as a downloadable asset (`paperink-pdf-<version>.apk`).
    - Automatically marks releases matching `*beta*` or `*alpha*` as Pre-releases on GitHub.
 
 To create and publish a new release:
 ```bash
-git tag -a v1.0.3-beta -m "Release v1.0.3-beta"
-git push origin v1.0.3-beta
+git tag -a v2.0.1-beta -m "Release v2.0.1-beta"
+git push origin v2.0.1-beta
 ```
 
 ---
@@ -196,6 +222,10 @@ git push origin v1.0.3-beta
 
 - **[Stirling-PDF](https://github.com/Stirling-Tools/Stirling-PDF)** (MIT License):
   Inspired our multi-tier PDF compression architecture, 8-bit monochrome/grayscale conversion for extreme space savings, size regression safeguard, and memory-safe streaming merge pipelines.
+- **[Google LiteRT-LM](https://github.com/google-ai-edge/litert-lm)**:
+  Powering on-device Gemma 4 2B generative AI assistant with GPU shader acceleration.
+- **[Google ML Kit](https://developers.google.com/ml-kit)**:
+  On-device Latin script OCR text recognition.
 
 ---
 
