@@ -1458,6 +1458,14 @@ object PdfEngine {
                 val pageTypeIdx = textContent.indexOf("/Page", pSearchIdx)
                 if (pageTypeIdx < 0) break
 
+                // In PDF specification, /Type /Page represents an individual page.
+                // It must NOT match /Type /Pages (pages tree node), /PageLabels, /PageMode, etc.
+                val charAfterPage = if (pageTypeIdx + 5 < textContent.length) textContent[pageTypeIdx + 5] else ' '
+                if (charAfterPage.isLetter() || charAfterPage == 's') {
+                    pSearchIdx = pageTypeIdx + 5
+                    continue
+                }
+
                 val lookbackStart = (pageTypeIdx - 30).coerceAtLeast(0)
                 val lookback = textContent.substring(lookbackStart, pageTypeIdx)
                 if (Regex("""/Type\s*$""").find(lookback) != null) {
