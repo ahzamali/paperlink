@@ -18,7 +18,7 @@ import com.paperink.data.model.PageAnnotationEntity
         PageAnnotationEntity::class,
         OcrCacheEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class PaperInkDatabase : RoomDatabase() {
@@ -30,9 +30,23 @@ abstract class PaperInkDatabase : RoomDatabase() {
 
         val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
+                // Migration from v1 to v2 (historical)
+            }
+        }
+
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
                 // Add new columns to documents
-                db.execSQL("ALTER TABLE documents ADD COLUMN isImageBased INTEGER NOT NULL DEFAULT 0")
-                db.execSQL("ALTER TABLE documents ADD COLUMN ocrStatus TEXT NOT NULL DEFAULT 'NONE'")
+                try {
+                    db.execSQL("ALTER TABLE documents ADD COLUMN isImageBased INTEGER NOT NULL DEFAULT 0")
+                } catch (_: Exception) {
+                    // Column already exists
+                }
+                try {
+                    db.execSQL("ALTER TABLE documents ADD COLUMN ocrStatus TEXT NOT NULL DEFAULT 'NONE'")
+                } catch (_: Exception) {
+                    // Column already exists
+                }
 
                 // Create ocr_text_cache table
                 db.execSQL("""
@@ -60,8 +74,9 @@ abstract class PaperInkDatabase : RoomDatabase() {
                     PaperInkDatabase::class.java,
                     "paper_ink_database"
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .fallbackToDestructiveMigration(dropAllTables = false)
+                    .fallbackToDestructiveMigrationOnDowngrade(dropAllTables = false)
                     .build()
                 INSTANCE = instance
                 instance
