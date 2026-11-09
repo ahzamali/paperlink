@@ -1415,8 +1415,8 @@ object PdfEngine {
                 val streamIdx = textContent.indexOf("stream", scanIdx)
                 if (streamIdx < 0) break
 
-                // Find the obj header before "stream"
-                val objHeaderStart = (streamIdx - 200).coerceAtLeast(0)
+                // Find the obj header before "stream" (search up to 4096 bytes back for dictionary)
+                val objHeaderStart = (streamIdx - 4096).coerceAtLeast(0)
                 val objHeaderChunk = textContent.substring(objHeaderStart, streamIdx)
                 val objIdMatch = Regex("""(\d+)\s+\d+\s+obj""").findAll(objHeaderChunk).lastOrNull()
                 val objId = objIdMatch?.groupValues?.get(1)?.toIntOrNull() ?: (allStreams.size + 1)
@@ -1451,13 +1451,36 @@ object PdfEngine {
                 scanIdx = (streamEnd + 9).coerceAtLeast(streamIdx + 6)
             }
 
-            // Find /Type /Page objects to associate streams with exact pages
-            val pageObjRegex = Regex("""(\d+)\s+(\d+)\s+obj\b(?:(?!endobj).)*?/Type\s*/Page\b.*?endobj""", setOf(RegexOption.DOT_MATCHES_ALL))
-            val pageObjects = pageObjRegex.findAll(textContent).toList()
+            // Find /Type /Page objects without catastrophic regex backtracking
+            val pageObjects = mutableListOf<String>()
+            var pSearchIdx = 0
+            while (pSearchIdx < textContent.length) {
+                val pageTypeIdx = textContent.indexOf("/Page", pSearchIdx)
+                if (pageTypeIdx < 0) break
+
+                val lookbackStart = (pageTypeIdx - 30).coerceAtLeast(0)
+                val lookback = textContent.substring(lookbackStart, pageTypeIdx)
+                if (Regex("""/Type\s*$""").find(lookback) != null) {
+                    val objLookbackStart = (pageTypeIdx - 1500).coerceAtLeast(0)
+                    val objLookback = textContent.substring(objLookbackStart, pageTypeIdx)
+                    val objMatch = Regex("""(\d+)\s+\d+\s+obj""").findAll(objLookback).lastOrNull()
+                    val objStart = if (objMatch != null) objLookbackStart + objMatch.range.first else objLookbackStart
+                    val endObjIdx = textContent.indexOf("endobj", pageTypeIdx)
+                    if (endObjIdx > objStart) {
+                        val pageObjStr = textContent.substring(objStart, endObjIdx + 6)
+                        pageObjects.add(pageObjStr)
+                        pSearchIdx = endObjIdx + 6
+                        continue
+                    }
+                }
+                pSearchIdx = pageTypeIdx + 5
+            }
+
+            val matchedStreamIds = mutableSetOf<Int>()
 
             if (pageObjects.isNotEmpty() && pageCount > 0) {
                 for (pIdx in 0 until pageCount.coerceAtMost(pageObjects.size)) {
-                    val pageObj = pageObjects[pIdx].value
+                    val pageObj = pageObjects[pIdx]
 
                     var pW = 595f
                     var pH = 842f
@@ -1482,6 +1505,7 @@ object PdfEngine {
 
                     val matchingStreams = allStreams.filter { it.objId in targetObjIds }
                     for (streamInfo in matchingStreams) {
+                        matchedStreamIds.add(streamInfo.objId)
                         val (streamText, streamSpans) = parsePdfTextStreamWithPositions(streamInfo.streamBytes, pW, pH)
                         if (streamText.isNotBlank()) {
                             textByPage[pIdx]?.append(" ")?.append(streamText)
@@ -1491,15 +1515,16 @@ object PdfEngine {
                 }
             }
 
-            // If any page still has no text, fallback to distributing all streams evenly across pages
-            val hasExtractedAny = textByPage.values.any { it.isNotBlank() }
-            if (!hasExtractedAny && allStreams.isNotEmpty()) {
-                for ((idx, streamInfo) in allStreams.withIndex()) {
-                    val p = if (pageCount > 0) idx % pageCount else 0
+            // For ANY pages that still have NO text, match unassigned streams!
+            val unusedStreams = allStreams.filter { it.objId !in matchedStreamIds }
+            val blankPages = (0 until pageCount).filter { textByPage[it]?.isBlank() == true }
+            if (blankPages.isNotEmpty() && unusedStreams.isNotEmpty()) {
+                for ((i, pIdx) in blankPages.withIndex()) {
+                    val streamInfo = if (i < unusedStreams.size) unusedStreams[i] else unusedStreams[i % unusedStreams.size]
                     val (streamText, streamSpans) = parsePdfTextStreamWithPositions(streamInfo.streamBytes, 595f, 842f)
                     if (streamText.isNotBlank()) {
-                        textByPage[p]?.append(" ")?.append(streamText)
-                        spansByPage[p]?.addAll(streamSpans)
+                        textByPage[pIdx]?.append(" ")?.append(streamText)
+                        spansByPage[pIdx]?.addAll(streamSpans)
                     }
                 }
             }

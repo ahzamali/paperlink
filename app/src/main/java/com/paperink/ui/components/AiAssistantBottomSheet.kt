@@ -248,18 +248,30 @@ fun AiAssistantBottomSheet(
                         }
                     } else {
                         // Context Scope Selector Chips
-                        Row(
+                        FlowRow(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 20.dp, vertical = 2.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            Text(
-                                text = "Scope:",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            FilterChip(
+                                selected = state.contextScopeMode == ContextScopeMode.DOCUMENT_OVERVIEW,
+                                onClick = { viewModel.setContextScopeMode(ContextScopeMode.DOCUMENT_OVERVIEW) },
+                                label = { Text("📚 All ${state.totalPages} Pages (Digest)", fontSize = 11.sp) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = OceanBlue,
+                                    selectedLabelColor = Color.White
+                                )
+                            )
+                            FilterChip(
+                                selected = state.contextScopeMode == ContextScopeMode.RELEVANT_SECTIONS,
+                                onClick = { viewModel.setContextScopeMode(ContextScopeMode.RELEVANT_SECTIONS) },
+                                label = { Text("🔍 Smart Search", fontSize = 11.sp) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = OceanBlue,
+                                    selectedLabelColor = Color.White
+                                )
                             )
                             FilterChip(
                                 selected = state.contextScopeMode == ContextScopeMode.CURRENT_PAGE,
@@ -270,24 +282,20 @@ fun AiAssistantBottomSheet(
                                     selectedLabelColor = Color.White
                                 )
                             )
-                            FilterChip(
-                                selected = state.contextScopeMode == ContextScopeMode.RELEVANT_SECTIONS,
-                                onClick = { viewModel.setContextScopeMode(ContextScopeMode.RELEVANT_SECTIONS) },
-                                label = { Text("🔍 Search Doc", fontSize = 11.sp) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = OceanBlue,
-                                    selectedLabelColor = Color.White
+                            for (range in state.availablePageRanges) {
+                                val startP = range.first + 1
+                                val endP = range.last + 1
+                                val isSelected = state.contextScopeMode == ContextScopeMode.PAGE_RANGE && state.selectedPageRange == range
+                                FilterChip(
+                                    selected = isSelected,
+                                    onClick = { viewModel.setPageRange(range) },
+                                    label = { Text("P. $startP–$endP", fontSize = 11.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = OceanBlue,
+                                        selectedLabelColor = Color.White
+                                    )
                                 )
-                            )
-                            FilterChip(
-                                selected = state.contextScopeMode == ContextScopeMode.DOCUMENT_OVERVIEW,
-                                onClick = { viewModel.setContextScopeMode(ContextScopeMode.DOCUMENT_OVERVIEW) },
-                                label = { Text("📚 Overview", fontSize = 11.sp) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = OceanBlue,
-                                    selectedLabelColor = Color.White
-                                )
-                            )
+                            }
                         }
 
                         // Document Context Status Bar

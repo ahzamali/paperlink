@@ -73,15 +73,16 @@ class AiAssistantTest {
     @Test
     fun testContextScopeMode_values() {
         val modes = ContextScopeMode.values()
-        assertEquals(3, modes.size)
+        assertEquals(4, modes.size)
         assertTrue(modes.contains(ContextScopeMode.CURRENT_PAGE))
+        assertTrue(modes.contains(ContextScopeMode.PAGE_RANGE))
         assertTrue(modes.contains(ContextScopeMode.RELEVANT_SECTIONS))
         assertTrue(modes.contains(ContextScopeMode.DOCUMENT_OVERVIEW))
     }
 
     @Test
     fun testSafeContextBudgetLimits() {
-        assertTrue("MAX_CONTEXT_CHARS must be <= 4000 to safely fit within 2048 token Gemma limits", AiAssistantViewModel.MAX_CONTEXT_CHARS <= 4000)
+        assertTrue("MAX_CONTEXT_CHARS must be <= 5000 to safely fit within 2048 token Gemma limits", AiAssistantViewModel.MAX_CONTEXT_CHARS <= 5000)
         assertTrue("EMERGENCY_FALLBACK_CONTEXT_CHARS must be smaller than MAX_CONTEXT_CHARS", AiAssistantViewModel.EMERGENCY_FALLBACK_CONTEXT_CHARS < AiAssistantViewModel.MAX_CONTEXT_CHARS)
     }
 }

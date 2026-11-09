@@ -28,8 +28,9 @@ import kotlin.coroutines.cancellation.CancellationException
 
 enum class ContextScopeMode {
     CURRENT_PAGE,       // Context is focused on the user's current reading page (Page X of Y)
-    RELEVANT_SECTIONS,  // Local RAG: dynamically retrieves pages matching query keywords
-    DOCUMENT_OVERVIEW   // Condensed multi-page outline (intro, key mid-sections, conclusion)
+    PAGE_RANGE,         // Context is focused on a selected batch/range of pages (e.g. Pages 1-10)
+    RELEVANT_SECTIONS,  // Chunk-level Local RAG: dynamically retrieves paragraphs matching query across ALL pages
+    DOCUMENT_OVERVIEW   // Complete document digest covering ALL pages in the document
 }
 
 data class ChatMessage(
@@ -51,7 +52,9 @@ data class AiChatState(
     val documentTextSnippet: String = "",
     val currentPageIndex: Int = 0,
     val totalPages: Int = 1,
-    val contextScopeMode: ContextScopeMode = ContextScopeMode.CURRENT_PAGE,
+    val contextScopeMode: ContextScopeMode = ContextScopeMode.DOCUMENT_OVERVIEW,
+    val selectedPageRange: IntRange? = null,
+    val availablePageRanges: List<IntRange> = emptyList(),
     val activeContextSnippet: String = "",
     val contextSummaryBadge: String = ""
 )
@@ -60,12 +63,12 @@ class AiAssistantViewModel(application: Application) : AndroidViewModel(applicat
 
     companion object {
         // Safe character limit for attached document context.
-        // 3,500 characters ≈ 850-900 tokens.
+        // 4,500 characters ≈ 1,100 tokens.
         // Gemma 4 2B on LiteRT-LM has a sequence length of 2,048 tokens.
-        // Keeping context under 3,500 chars leaves ~1,100 tokens for system prompt, user queries,
+        // Keeping context under 4,500 chars leaves ~900 tokens for system prompt, user queries,
         // multi-turn conversation history, and model generation, preventing "context too long" errors.
-        const val MAX_CONTEXT_CHARS = 3500
-        const val EMERGENCY_FALLBACK_CONTEXT_CHARS = 1600
+        const val MAX_CONTEXT_CHARS = 4500
+        const val EMERGENCY_FALLBACK_CONTEXT_CHARS = 1800
 
         private val STOPWORDS = setOf(
             "a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "aren't",
@@ -151,12 +154,26 @@ class AiAssistantViewModel(application: Application) : AndroidViewModel(applicat
         if (titleChanged || pageChanged || totalPagesChanged || pagesTextChanged || snippetChanged) {
             this.pagesText = pagesText
             this.fallbackSnippet = fallbackSnippet
+
+            val ranges = if (totalPages > 5) {
+                val batchSize = 10
+                (0 until totalPages step batchSize).map { start ->
+                    start until (start + batchSize).coerceAtMost(totalPages)
+                }
+            } else {
+                emptyList()
+            }
+
+            // Default to DOCUMENT_OVERVIEW for multi-page documents so the user gets full document coverage immediately
+            val initialMode = if (totalPages > 1) ContextScopeMode.DOCUMENT_OVERVIEW else ContextScopeMode.CURRENT_PAGE
+
             val (activeCtx, badge) = resolveContextSnippet(
-                mode = _state.value.contextScopeMode,
+                mode = initialMode,
                 currentPageIndex = currentPageIndex,
                 totalPages = totalPages,
                 pagesText = pagesText,
                 fallbackSnippet = fallbackSnippet,
+                selectedRange = null,
                 query = null,
                 maxChars = MAX_CONTEXT_CHARS
             )
@@ -166,6 +183,8 @@ class AiAssistantViewModel(application: Application) : AndroidViewModel(applicat
                     documentTextSnippet = snippet,
                     currentPageIndex = currentPageIndex,
                     totalPages = totalPages.coerceAtLeast(1),
+                    contextScopeMode = initialMode,
+                    availablePageRanges = ranges,
                     activeContextSnippet = activeCtx,
                     contextSummaryBadge = badge
                 )
@@ -190,22 +209,46 @@ class AiAssistantViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     /**
-     * Toggles between Current Page, Keyword-Matched Relevant Sections, and Document Overview.
+     * Toggles between Current Page, Page Range, Keyword-Matched Relevant Sections, and Document Overview.
      */
     fun setContextScopeMode(mode: ContextScopeMode) {
-        if (_state.value.contextScopeMode == mode) return
+        if (_state.value.contextScopeMode == mode && mode != ContextScopeMode.PAGE_RANGE) return
         val (activeCtx, badge) = resolveContextSnippet(
             mode = mode,
             currentPageIndex = _state.value.currentPageIndex,
             totalPages = _state.value.totalPages,
             pagesText = pagesText,
             fallbackSnippet = fallbackSnippet,
+            selectedRange = _state.value.selectedPageRange,
             query = null,
             maxChars = MAX_CONTEXT_CHARS
         )
         _state.update {
             it.copy(
                 contextScopeMode = mode,
+                activeContextSnippet = activeCtx,
+                contextSummaryBadge = badge
+            )
+        }
+        if (_state.value.isEngineReady) {
+            restartConversationWithCurrentDocument()
+        }
+    }
+
+    /**
+     * Sets context to a specific range of pages (e.g. Pages 1-10).
+     */
+    fun setPageRange(range: IntRange) {
+        val (activeCtx, badge) = buildPageRangeContext(
+            range = range,
+            totalPages = _state.value.totalPages,
+            pagesText = pagesText,
+            maxChars = MAX_CONTEXT_CHARS
+        )
+        _state.update {
+            it.copy(
+                contextScopeMode = ContextScopeMode.PAGE_RANGE,
+                selectedPageRange = range,
                 activeContextSnippet = activeCtx,
                 contextSummaryBadge = badge
             )
@@ -224,15 +267,20 @@ class AiAssistantViewModel(application: Application) : AndroidViewModel(applicat
         totalPages: Int,
         pagesText: Map<Int, String>,
         fallbackSnippet: String,
+        selectedRange: IntRange?,
         query: String?,
         maxChars: Int
     ): Pair<String, String> {
         return when (mode) {
             ContextScopeMode.CURRENT_PAGE -> buildCurrentPageContext(currentPageIndex, totalPages, pagesText, fallbackSnippet, maxChars)
+            ContextScopeMode.PAGE_RANGE -> {
+                val range = selectedRange ?: (0..9.coerceAtMost(totalPages - 1))
+                buildPageRangeContext(range, totalPages, pagesText, maxChars)
+            }
             ContextScopeMode.DOCUMENT_OVERVIEW -> buildDocumentOverviewContext(totalPages, pagesText, fallbackSnippet, maxChars)
             ContextScopeMode.RELEVANT_SECTIONS -> {
                 if (query.isNullOrBlank()) {
-                    buildCurrentPageContext(currentPageIndex, totalPages, pagesText, fallbackSnippet, maxChars)
+                    buildDocumentOverviewContext(totalPages, pagesText, fallbackSnippet, maxChars)
                 } else {
                     buildRelevantSectionsContext(query, currentPageIndex, totalPages, pagesText, fallbackSnippet, maxChars)
                 }
@@ -259,8 +307,8 @@ class AiAssistantViewModel(application: Application) : AndroidViewModel(applicat
         builder.append("--- PAGE $pageNum OF $totalPages ---\n")
         builder.append(pageText.take(maxChars - 200))
 
-        // If current page is short (< 1,200 chars) and next page exists, add preview
-        if (pageText.length < 1200 && currentPageIndex + 1 < totalPages) {
+        // If current page is short (< 1,500 chars) and next page exists, add preview
+        if (pageText.length < 1500 && currentPageIndex + 1 < totalPages) {
             val nextText = pagesText[currentPageIndex + 1]?.trim()
             if (!nextText.isNullOrBlank()) {
                 val remaining = maxChars - builder.length - 100
@@ -272,6 +320,34 @@ class AiAssistantViewModel(application: Application) : AndroidViewModel(applicat
         }
 
         val badge = "Page $pageNum of $totalPages (${builder.length} chars)"
+        return Pair(builder.toString(), badge)
+    }
+
+    private fun buildPageRangeContext(
+        range: IntRange,
+        totalPages: Int,
+        pagesText: Map<Int, String>,
+        maxChars: Int
+    ): Pair<String, String> {
+        val startPage = range.first + 1
+        val endPage = (range.last + 1).coerceAtMost(totalPages)
+        val numPagesInRange = (endPage - startPage + 1).coerceAtLeast(1)
+        val perPageBudget = (maxChars / numPagesInRange).coerceAtLeast(250)
+
+        val builder = StringBuilder()
+        builder.append("=== SECTION: PAGES $startPage TO $endPage (OF $totalPages) ===\n\n")
+
+        for (p in range) {
+            if (p >= totalPages) break
+            val text = pagesText[p]?.trim() ?: continue
+            if (builder.length >= maxChars - 100) break
+
+            if (builder.isNotEmpty()) builder.append("\n\n")
+            builder.append("--- PAGE ${p + 1} OF $totalPages ---\n")
+            builder.append(text.take(perPageBudget))
+        }
+
+        val badge = "Pages $startPage–$endPage of $totalPages (${builder.length} chars)"
         return Pair(builder.toString(), badge)
     }
 
@@ -294,42 +370,45 @@ class AiAssistantViewModel(application: Application) : AndroidViewModel(applicat
             return Pair(combined, "Full Document (${combined.length} chars)")
         }
 
-        // Multi-page document: sample introduction, middle, and conclusion
-        val introBudget = (maxChars * 0.40).toInt()
-        val middleBudget = (maxChars * 0.35).toInt()
-        val conclusionBudget = (maxChars * 0.25).toInt()
-
         val builder = StringBuilder()
+        builder.append("=== FULL DOCUMENT DIGEST (All $numPages Pages) ===\n\n")
 
         // 1. First page (Intro / Title)
         val firstPageText = pagesText[0]?.trim() ?: ""
         if (firstPageText.isNotBlank()) {
-            builder.append("--- PAGE 1 (Introduction / Overview) ---\n")
-            builder.append(firstPageText.take(introBudget))
+            builder.append("--- PAGE 1 (Title & Introduction) ---\n")
+            builder.append(firstPageText.take(900))
+            builder.append("\n\n")
         }
 
-        // 2. Middle page (Mid Section)
-        val midIdx = numPages / 2
-        val midText = pagesText[midIdx]?.trim() ?: ""
-        if (midText.isNotBlank()) {
-            if (builder.isNotEmpty()) builder.append("\n\n")
-            builder.append("--- PAGE ${midIdx + 1} (Mid Section) ---\n")
-            builder.append(midText.take(middleBudget))
+        // 2. Comprehensive Page-by-Page Index covering ALL pages (Pages 1 to N)
+        builder.append("--- COMPLETE SECTION & TOPIC INDEX (All Pages 1 to $numPages) ---\n")
+        val perPageChars = (2400 / numPages).coerceIn(45, 120)
+        for (p in 0 until numPages) {
+            val raw = pagesText[p]?.trim() ?: ""
+            if (raw.isNotBlank()) {
+                val cleanLine = raw.replace(Regex("""\s+"""), " ").take(perPageChars)
+                builder.append("[Page ${p + 1}]: $cleanLine\n")
+            } else {
+                builder.append("[Page ${p + 1}]: (Empty / Graphics)\n")
+            }
         }
 
-        // 3. Last page (Conclusion)
+        // 3. Final Conclusion / Summary Page
         val lastIdx = numPages - 1
-        if (lastIdx > 0 && lastIdx != midIdx) {
+        if (lastIdx > 0) {
             val lastText = pagesText[lastIdx]?.trim() ?: ""
             if (lastText.isNotBlank()) {
-                if (builder.isNotEmpty()) builder.append("\n\n")
-                builder.append("--- PAGE ${lastIdx + 1} (Conclusion / Final Page) ---\n")
-                builder.append(lastText.take(conclusionBudget))
+                builder.append("\n--- PAGE ${lastIdx + 1} (Final Conclusion & Summary) ---\n")
+                val remaining = maxChars - builder.length
+                if (remaining > 200) {
+                    builder.append(lastText.take(remaining))
+                }
             }
         }
 
         val result = builder.toString().take(maxChars)
-        val badge = "Overview: Pages 1, ${midIdx + 1}, ${numPages} ($numPages pages total)"
+        val badge = "All $numPages Pages Digest (${result.length} chars)"
         return Pair(result, badge)
     }
 
@@ -345,50 +424,92 @@ class AiAssistantViewModel(application: Application) : AndroidViewModel(applicat
             return buildCurrentPageContext(currentPageIndex, totalPages, pagesText, fallbackSnippet, maxChars)
         }
 
+        // 1. Check if user explicitly asked for a specific page: e.g. "page 14"
+        val singlePageMatch = Regex("""\b(?:page|p\.)\s*(\d+)\b""", RegexOption.IGNORE_CASE).find(query)
+        if (singlePageMatch != null) {
+            val targetPage = singlePageMatch.groupValues[1].toIntOrNull()
+            if (targetPage != null && targetPage in 1..totalPages) {
+                return buildCurrentPageContext(targetPage - 1, totalPages, pagesText, fallbackSnippet, maxChars)
+            }
+        }
+
+        // Check if user asked for a page range: e.g. "pages 5-10" or "pages 5 to 10"
+        val rangeMatch = Regex("""\b(?:pages|p\.)\s*(\d+)\s*(?:to|-)\s*(\d+)\b""", RegexOption.IGNORE_CASE).find(query)
+        if (rangeMatch != null) {
+            val startP = rangeMatch.groupValues[1].toIntOrNull()
+            val endP = rangeMatch.groupValues[2].toIntOrNull()
+            if (startP != null && endP != null && startP in 1..totalPages && endP >= startP) {
+                return buildPageRangeContext((startP - 1)..(endP - 1).coerceAtMost(totalPages - 1), totalPages, pagesText, maxChars)
+            }
+        }
+
         val queryTokens = query.lowercase()
             .split(Regex("[^a-zA-Z0-9]+"))
             .filter { it.length > 2 && it !in STOPWORDS }
 
         if (queryTokens.isEmpty()) {
-            return buildCurrentPageContext(currentPageIndex, totalPages, pagesText, fallbackSnippet, maxChars)
+            return buildDocumentOverviewContext(totalPages, pagesText, fallbackSnippet, maxChars)
         }
 
-        // Score pages by keyword frequency
-        val scoredPages = pagesText.mapNotNull { (pageIdx, text) ->
-            val lowerText = text.lowercase()
-            var matches = 0
+        // 2. Paragraph-level chunking across ALL pages
+        data class TextChunk(val pageIndex: Int, val text: String, var score: Int)
+        val allChunks = mutableListOf<TextChunk>()
+
+        for ((pIdx, pageContent) in pagesText) {
+            val paragraphs = pageContent.split(Regex("""\n\s*\n|\r\n\s*\r\n"""))
+                .map { it.trim() }
+                .filter { it.length > 30 }
+
+            if (paragraphs.isEmpty() && pageContent.trim().length > 30) {
+                allChunks.add(TextChunk(pIdx, pageContent.trim().take(500), 0))
+            } else {
+                for (p in paragraphs) {
+                    val chunkText = p.take(450)
+                    allChunks.add(TextChunk(pIdx, chunkText, 0))
+                }
+            }
+        }
+
+        // Score chunks against query tokens
+        for (chunk in allChunks) {
+            val lower = chunk.text.lowercase()
+            var s = 0
             for (token in queryTokens) {
                 var idx = 0
                 while (true) {
-                    idx = lowerText.indexOf(token, idx)
+                    idx = lower.indexOf(token, idx)
                     if (idx < 0) break
-                    matches++
+                    s += 2
                     idx += token.length
                 }
             }
-            if (matches > 0) Pair(pageIdx, matches) else null
-        }.sortedByDescending { it.second }
+            chunk.score = s
+        }
 
-        if (scoredPages.isEmpty()) {
-            val (pageCtx, _) = buildCurrentPageContext(currentPageIndex, totalPages, pagesText, fallbackSnippet, maxChars)
-            return Pair(pageCtx, "Page ${currentPageIndex + 1} (No direct keyword matches)")
+        val topChunks = allChunks.filter { it.score > 0 }.sortedByDescending { it.score }
+
+        if (topChunks.isEmpty()) {
+            return buildDocumentOverviewContext(totalPages, pagesText, fallbackSnippet, maxChars)
         }
 
         val builder = StringBuilder()
-        val matchedPageNumbers = mutableListOf<Int>()
-        for ((pageIdx, _) in scoredPages) {
-            val pageText = pagesText[pageIdx]?.trim() ?: continue
-            val remainingBudget = maxChars - builder.length
-            if (remainingBudget < 250) break
+        val pagesCovered = mutableSetOf<Int>()
+        var chunkCount = 0
 
-            val excerpt = pageText.take(remainingBudget)
+        for (chunk in topChunks) {
+            val remaining = maxChars - builder.length
+            if (remaining < 150) break
+
+            val slice = chunk.text.take(remaining - 60)
             if (builder.isNotEmpty()) builder.append("\n\n")
-            builder.append("--- PAGE ${pageIdx + 1} (Relevance match) ---\n")
-            builder.append(excerpt)
-            matchedPageNumbers.add(pageIdx + 1)
+            builder.append("--- EXCERPT FROM PAGE ${chunk.pageIndex + 1} ---\n")
+            builder.append(slice)
+            pagesCovered.add(chunk.pageIndex + 1)
+            chunkCount++
         }
 
-        val badge = "Matched Pages ${matchedPageNumbers.take(3).joinToString(", ")} (${builder.length} chars)"
+        val sortedPages = pagesCovered.sorted()
+        val badge = "Matched Pages ${sortedPages.take(6).joinToString(", ")}${if (sortedPages.size > 6) "..." else ""} ($chunkCount chunks, ${builder.length} chars)"
         return Pair(builder.toString(), badge)
     }
 
@@ -497,7 +618,7 @@ class AiAssistantViewModel(application: Application) : AndroidViewModel(applicat
             INSTRUCTIONS:
             - You have access to the attached document excerpt above.
             - Answer questions, provide summaries, and extract insights directly based on this document content.
-            - Cite specific facts, sections, or details from the document excerpt.
+            - Cite specific facts, sections, or page numbers from the document excerpt whenever available.
             - If a question asks about details not present in the excerpt, state what is available and what is missing.
             """.trimIndent()
         } else {
@@ -559,12 +680,11 @@ class AiAssistantViewModel(application: Application) : AndroidViewModel(applicat
             try {
                 val eng = checkNotNull(engine) { "Engine not ready" }
 
-                // If in RELEVANT_SECTIONS mode, dynamically retrieve query-specific passages
-                val isRelevantMode = _state.value.contextScopeMode == ContextScopeMode.RELEVANT_SECTIONS
+                // Check if user's question can be dynamically answered with relevant sections RAG
                 var customContext: String? = null
                 var customBadge: String? = null
 
-                if (isRelevantMode && pagesText.isNotEmpty()) {
+                if (pagesText.isNotEmpty() && _state.value.contextScopeMode != ContextScopeMode.CURRENT_PAGE && _state.value.contextScopeMode != ContextScopeMode.PAGE_RANGE) {
                     val (ctx, badge) = buildRelevantSectionsContext(
                         query = text,
                         currentPageIndex = _state.value.currentPageIndex,
@@ -578,9 +698,9 @@ class AiAssistantViewModel(application: Application) : AndroidViewModel(applicat
                     _state.update { it.copy(activeContextSnippet = ctx, contextSummaryBadge = badge) }
                 }
 
-                // If multi-turn history grows beyond 3 turns, or query context changed, recreate conversation
+                // If multi-turn history grows beyond 3 turns, or dynamic query context was used, recreate conversation
                 // to prevent KV-cache sequence length overflow
-                if (conversation == null || conversationTurnCount >= 3 || isRelevantMode) {
+                if (conversation == null || conversationTurnCount >= 3 || customContext != null) {
                     conversation?.close()
                     val systemPrompt = buildSystemPrompt(customContext, customBadge)
                     conversation = eng.createConversation(
@@ -687,6 +807,7 @@ class AiAssistantViewModel(application: Application) : AndroidViewModel(applicat
                     totalPages = _state.value.totalPages,
                     pagesText = pagesText,
                     fallbackSnippet = fallbackSnippet,
+                    selectedRange = null,
                     query = null,
                     maxChars = EMERGENCY_FALLBACK_CONTEXT_CHARS
                 )
@@ -715,7 +836,7 @@ class AiAssistantViewModel(application: Application) : AndroidViewModel(applicat
     fun summarizeDocument() {
         setContextScopeMode(ContextScopeMode.DOCUMENT_OVERVIEW)
         val prompt = if (_state.value.documentTextSnippet.isNotBlank() || pagesText.isNotEmpty()) {
-            "Please provide a comprehensive summary of this document based on the overview provided. Include 3-5 key takeaways and bullet points."
+            "Please provide a comprehensive summary of this complete document based on the overview provided. Include 3-5 key takeaways and bullet points."
         } else {
             "Please summarize this document."
         }
