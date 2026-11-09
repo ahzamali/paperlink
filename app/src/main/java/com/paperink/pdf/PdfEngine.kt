@@ -1133,6 +1133,22 @@ object PdfEngine {
 
     private val extractedTextCache = LruCache<String, Map<Int, ExtractedPageData>>(15)
 
+    fun getExtractedPageData(filePath: String): Map<Int, ExtractedPageData>? {
+        return extractedTextCache.get(filePath)
+    }
+
+    fun setExtractedPageData(filePath: String, data: Map<Int, ExtractedPageData>) {
+        extractedTextCache.put(filePath, data)
+    }
+
+    suspend fun getOrExtractText(filePath: String, pageCount: Int): Map<Int, ExtractedPageData> = withContext(Dispatchers.IO) {
+        extractedTextCache.get(filePath) ?: run {
+            val extracted = extractTextFromPdf(filePath, pageCount)
+            extractedTextCache.put(filePath, extracted)
+            extracted
+        }
+    }
+
     suspend fun searchInPdf(
         filePath: String,
         query: String,
@@ -1143,11 +1159,7 @@ object PdfEngine {
         if (q.isBlank()) return@withContext emptyList()
 
         try {
-            val pageContentMap = extractedTextCache.get(filePath) ?: run {
-                val extracted = extractTextFromPdf(filePath, pageCount)
-                extractedTextCache.put(filePath, extracted)
-                extracted
-            }
+            val pageContentMap = getOrExtractText(filePath, pageCount)
 
             val results = mutableListOf<PdfSearchMatch>()
 

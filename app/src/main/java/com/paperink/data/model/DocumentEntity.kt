@@ -31,5 +31,7 @@ data class DocumentEntity(
     val isFavorite: Boolean = false,
     val tags: String = "",
     val createdAt: Long = System.currentTimeMillis(),
-    val lastReadAt: Long = System.currentTimeMillis()
+    val lastReadAt: Long = System.currentTimeMillis(),
+    val isImageBased: Boolean = false,
+    val ocrStatus: String = "NONE" // NONE, PENDING, DONE, FAILED
 )

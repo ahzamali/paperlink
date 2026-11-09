@@ -135,6 +135,18 @@ dependencies {
   implementation(libs.okhttp)
   // implementation(libs.play.services.location)
   implementation(libs.retrofit)
+
+  // OCR Text Recognition (On-device ML Kit)
+  implementation(libs.mlkit.text.recognition)
+
+  // LiteRT-LM for On-Device LLM (Gemma 4 2B)
+  implementation("com.google.ai.edge.litertlm:litertlm-android:0.18.0") {
+    exclude(group = "org.jetbrains.kotlin", module = "kotlin-stdlib")
+    exclude(group = "org.jetbrains.kotlin", module = "kotlin-stdlib-jdk7")
+    exclude(group = "org.jetbrains.kotlin", module = "kotlin-stdlib-jdk8")
+    exclude(group = "org.jetbrains.kotlin", module = "kotlin-reflect")
+  }
+
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)
   testImplementation(libs.androidx.junit)

@@ -57,6 +57,7 @@ import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.TrendingDown
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Brush
@@ -95,6 +96,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -193,6 +195,8 @@ fun ReaderScreen(
     val exportSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val thumbnailsSheetState = rememberModalBottomSheetState()
     val searchResultsSheetState = rememberModalBottomSheetState()
+    val aiViewModel: com.paperink.ai.AiAssistantViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+    val aiSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
 
     val verticalLazyListState = rememberLazyListState()
 
@@ -806,6 +810,28 @@ fun ReaderScreen(
                     }
                 }
             }
+        },
+        floatingActionButton = {
+            FloatingActionButton(
+                onClick = {
+                    val title = uiState.document?.title ?: "Document"
+                    val snippet = viewModel.getDocumentTextSnippet()
+                    aiViewModel.setDocumentContext(title, snippet)
+                    viewModel.openAiAssistant()
+                },
+                containerColor = com.paperink.ui.theme.OceanBlue,
+                contentColor = Color.White,
+                shape = CircleShape,
+                modifier = Modifier
+                    .testTag("ai_assistant_fab")
+                    .navigationBarsPadding()
+            ) {
+                Icon(
+                    imageVector = Icons.Default.AutoAwesome,
+                    contentDescription = "PaperInk AI (Gemma 4 2B)",
+                    modifier = Modifier.size(24.dp)
+                )
+            }
         }
     ) { innerPadding ->
         Box(
@@ -936,6 +962,19 @@ fun ReaderScreen(
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
+                    if (uiState.showOcrPrompt || uiState.isOcrScanning) {
+                        item(key = "ocr_banner_card") {
+                            com.paperink.ui.components.OcrBannerCard(
+                                isScanning = uiState.isOcrScanning,
+                                progress = uiState.ocrProgress,
+                                currentPage = uiState.ocrCurrentPage,
+                                totalPages = uiState.totalPages,
+                                onStartOcr = { viewModel.runOcr() },
+                                onDismiss = { viewModel.dismissOcrPrompt() }
+                            )
+                        }
+                    }
+
                     items(uiState.totalPages, key = { it }) { pageIdx ->
                         val pageMatches = uiState.getSearchMatchesForPage(pageIdx)
                         val isCurrentMatch = uiState.isSearchActive && uiState.currentMatch?.pageIndex == pageIdx
@@ -1136,6 +1175,15 @@ fun ReaderScreen(
                 }
             }
         }
+    }
+
+    // PaperInk AI Assistant Bottom Sheet (Gemma 4 2B)
+    if (uiState.showAiAssistant) {
+        com.paperink.ui.components.AiAssistantBottomSheet(
+            viewModel = aiViewModel,
+            sheetState = aiSheetState,
+            onDismissRequest = { viewModel.closeAiAssistant() }
+        )
     }
 
     // Jump to Page Dialog

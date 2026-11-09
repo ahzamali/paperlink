@@ -424,4 +424,30 @@ class DocumentRepository(
             )
         }
     }
+
+    // OCR Cache persistence
+    suspend fun getOcrCacheForDocument(documentId: Long): List<com.paperink.data.model.OcrCacheEntity> = withContext(Dispatchers.IO) {
+        dao.getOcrCacheForDocument(documentId)
+    }
+
+    suspend fun saveOcrCache(
+        documentId: Long,
+        pageIndex: Int,
+        fullText: String,
+        spans: List<PdfEngine.PositionedTextSpan>
+    ) = withContext(Dispatchers.IO) {
+        val spansJson = com.paperink.pdf.OcrEngine.serializeSpans(spans)
+        dao.insertOcrCache(
+            com.paperink.data.model.OcrCacheEntity(
+                documentId = documentId,
+                pageIndex = pageIndex,
+                fullText = fullText,
+                spansJson = spansJson
+            )
+        )
+    }
+
+    suspend fun updateDocumentOcrStatus(documentId: Long, isImageBased: Boolean, ocrStatus: String) = withContext(Dispatchers.IO) {
+        dao.updateOcrStatus(documentId, isImageBased, ocrStatus)
+    }
 }

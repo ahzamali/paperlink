@@ -7,6 +7,7 @@ import androidx.room.Query
 import androidx.room.Update
 import com.paperink.data.model.DocumentEntity
 import com.paperink.data.model.FolderEntity
+import com.paperink.data.model.OcrCacheEntity
 import com.paperink.data.model.PageAnnotationEntity
 import kotlinx.coroutines.flow.Flow
 
@@ -62,6 +63,9 @@ interface PaperInkDao {
     @Query("UPDATE documents SET folderId = :folderId WHERE id = :id")
     suspend fun moveToFolder(id: Long, folderId: Long?)
 
+    @Query("UPDATE documents SET isImageBased = :isImage, ocrStatus = :status WHERE id = :id")
+    suspend fun updateOcrStatus(id: Long, isImage: Boolean, status: String)
+
     @Query("DELETE FROM documents WHERE id = :id")
     suspend fun deleteDocumentById(id: Long)
 
@@ -116,4 +120,20 @@ interface PaperInkDao {
 
     @Query("DELETE FROM page_annotations WHERE id = :id")
     suspend fun deleteAnnotationById(id: Long)
+
+    // OCR Cache
+    @Query("SELECT * FROM ocr_text_cache WHERE documentId = :docId ORDER BY pageIndex ASC")
+    suspend fun getOcrCacheForDocument(docId: Long): List<OcrCacheEntity>
+
+    @Query("SELECT * FROM ocr_text_cache WHERE documentId = :docId AND pageIndex = :pageIndex LIMIT 1")
+    suspend fun getOcrCacheForPage(docId: Long, pageIndex: Int): OcrCacheEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertOcrCache(cache: OcrCacheEntity): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertOcrCaches(caches: List<OcrCacheEntity>)
+
+    @Query("DELETE FROM ocr_text_cache WHERE documentId = :docId")
+    suspend fun deleteOcrCacheForDocument(docId: Long)
 }

@@ -19,6 +19,7 @@ import com.paperink.data.model.StrokeAnnotation
 import com.paperink.data.model.TextAnnotation
 import com.paperink.data.model.ToolType
 import com.paperink.data.repository.DocumentRepository
+import com.paperink.pdf.OcrEngine
 import com.paperink.pdf.PdfEngine
 import com.paperink.pdf.PdfPrintAdapter
 import com.paperink.ui.theme.AnnotationBlack
@@ -62,6 +63,13 @@ data class ReaderUiState(
     val pdfSearchResults: List<PdfSearchMatch> = emptyList(),
     val currentSearchMatchIndex: Int = 0,
     val isSearchingInPdf: Boolean = false,
+    // OCR status
+    val isOcrScanning: Boolean = false,
+    val ocrProgress: Float = 0f,
+    val ocrCurrentPage: Int = 0,
+    val showOcrPrompt: Boolean = false,
+    // AI Assistant (Gemma 4 2B)
+    val showAiAssistant: Boolean = false,
     // Compression
     val isCompressing: Boolean = false,
     val compressionResult: CompressionResult? = null,
@@ -96,6 +104,7 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
     private val undoStack = mutableListOf<Map<Int, List<StrokeAnnotation>>>()
     private val redoStack = mutableListOf<Map<Int, List<StrokeAnnotation>>>()
     private var searchJob: Job? = null
+    private var ocrJob: Job? = null
 
     companion object {
         private const val MAX_STACK_SIZE = 50
@@ -129,9 +138,13 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
                     document = doc,
                     currentPageIndex = doc.currentPage.coerceIn(0, (doc.pageCount - 1).coerceAtLeast(0)),
                     totalPages = doc.pageCount.coerceAtLeast(1),
-                    isPageLoading = true
+                    isPageLoading = true,
+                    showOcrPrompt = doc.isImageBased && doc.ocrStatus != "DONE"
                 )
             }
+
+            // Quick non-blocking background check for cached OCR or text extraction
+            checkAndLoadOcrCache(doc)
 
             // Check if password protected
             val isProtected = withContext(Dispatchers.IO) {
@@ -196,6 +209,118 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
                 )
             }
         }
+    }
+
+    private suspend fun checkAndLoadOcrCache(doc: DocumentEntity) = withContext(Dispatchers.IO) {
+        val ocrCaches = repository.getOcrCacheForDocument(doc.id)
+        if (ocrCaches.isNotEmpty()) {
+            val pageDataMap = ocrCaches.associate { cache ->
+                cache.pageIndex to PdfEngine.ExtractedPageData(
+                    fullText = cache.fullText,
+                    spans = OcrEngine.deserializeSpans(cache.spansJson)
+                )
+            }
+            PdfEngine.setExtractedPageData(doc.filePath, pageDataMap)
+            _uiState.update { it.copy(showOcrPrompt = false) }
+        } else {
+            // Check native text streams
+            val extracted = PdfEngine.getOrExtractText(doc.filePath, doc.pageCount)
+            val isImage = OcrEngine.isImageBased(extracted)
+            if (isImage) {
+                repository.updateDocumentOcrStatus(doc.id, isImageBased = true, ocrStatus = doc.ocrStatus)
+                _uiState.update { it.copy(showOcrPrompt = doc.ocrStatus != "DONE") }
+            }
+        }
+    }
+
+    fun dismissOcrPrompt() {
+        _uiState.update { it.copy(showOcrPrompt = false) }
+    }
+
+    fun runOcr() {
+        val doc = _uiState.value.document ?: return
+        if (_uiState.value.isOcrScanning) return
+        ocrJob?.cancel()
+        ocrJob = viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isOcrScanning = true,
+                    ocrProgress = 0f,
+                    ocrCurrentPage = 0,
+                    showOcrPrompt = true
+                )
+            }
+            try {
+                val totalPages = doc.pageCount
+                val pageDataMap = mutableMapOf<Int, PdfEngine.ExtractedPageData>()
+
+                withContext(Dispatchers.IO) {
+                    for (pageIdx in 0 until totalPages) {
+                        _uiState.update {
+                            it.copy(
+                                ocrCurrentPage = pageIdx + 1,
+                                ocrProgress = (pageIdx + 1).toFloat() / totalPages.toFloat()
+                            )
+                        }
+
+                        val bitmap = PdfEngine.renderPageBitmap(doc.filePath, pageIdx, targetWidth = 1500)
+                        if (bitmap != null) {
+                            val extractedPage = OcrEngine.recognizePage(bitmap)
+                            bitmap.recycle()
+
+                            pageDataMap[pageIdx] = extractedPage
+
+                            repository.saveOcrCache(
+                                documentId = doc.id,
+                                pageIndex = pageIdx,
+                                fullText = extractedPage.fullText,
+                                spans = extractedPage.spans
+                            )
+                        }
+                    }
+
+                    PdfEngine.setExtractedPageData(doc.filePath, pageDataMap)
+                    repository.updateDocumentOcrStatus(doc.id, isImageBased = true, ocrStatus = "DONE")
+                }
+
+                _uiState.update {
+                    it.copy(
+                        isOcrScanning = false,
+                        showOcrPrompt = false,
+                        userMessage = "OCR complete! Search enabled on document."
+                    )
+                }
+
+                if (_uiState.value.pdfSearchQuery.isNotBlank()) {
+                    performSearch(_uiState.value.pdfSearchQuery)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                _uiState.update {
+                    it.copy(
+                        isOcrScanning = false,
+                        userMessage = "OCR failed: ${e.message}"
+                    )
+                }
+            }
+        }
+    }
+
+    fun openAiAssistant() {
+        _uiState.update { it.copy(showAiAssistant = true) }
+    }
+
+    fun closeAiAssistant() {
+        _uiState.update { it.copy(showAiAssistant = false) }
+    }
+
+    fun getDocumentTextSnippet(): String {
+        val doc = _uiState.value.document ?: return ""
+        val cached = PdfEngine.getExtractedPageData(doc.filePath)
+        if (!cached.isNullOrEmpty()) {
+            return cached.values.joinToString("\n\n") { it.fullText.trim() }
+        }
+        return ""
     }
 
     /**
@@ -673,11 +798,13 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
                 pageCount = doc.pageCount,
                 allPageTexts = _uiState.value.allPageTexts
             )
+            val shouldPromptOcr = matches.isEmpty() && doc.isImageBased && doc.ocrStatus != "DONE"
             _uiState.update {
                 it.copy(
                     pdfSearchResults = matches,
                     currentSearchMatchIndex = 0,
-                    isSearchingInPdf = false
+                    isSearchingInPdf = false,
+                    showOcrPrompt = if (shouldPromptOcr) true else it.showOcrPrompt
                 )
             }
             if (matches.isNotEmpty()) {

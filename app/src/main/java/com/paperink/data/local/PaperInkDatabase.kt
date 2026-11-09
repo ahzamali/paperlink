@@ -4,15 +4,19 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import com.paperink.data.model.DocumentEntity
 import com.paperink.data.model.FolderEntity
+import com.paperink.data.model.OcrCacheEntity
 import com.paperink.data.model.PageAnnotationEntity
 
 @Database(
     entities = [
         FolderEntity::class,
         DocumentEntity::class,
-        PageAnnotationEntity::class
+        PageAnnotationEntity::class,
+        OcrCacheEntity::class
     ],
     version = 2,
     exportSchema = false
@@ -24,9 +28,28 @@ abstract class PaperInkDatabase : RoomDatabase() {
         @Volatile
         private var INSTANCE: PaperInkDatabase? = null
 
-        private val MIGRATION_1_2 = object : androidx.room.migration.Migration(1, 2) {
-            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
-                // Version 1 to 2 schema migration
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Add new columns to documents
+                db.execSQL("ALTER TABLE documents ADD COLUMN isImageBased INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE documents ADD COLUMN ocrStatus TEXT NOT NULL DEFAULT 'NONE'")
+
+                // Create ocr_text_cache table
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS ocr_text_cache (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        documentId INTEGER NOT NULL,
+                        pageIndex INTEGER NOT NULL,
+                        fullText TEXT NOT NULL,
+                        spansJson TEXT NOT NULL,
+                        createdAt INTEGER NOT NULL,
+                        FOREIGN KEY (documentId) REFERENCES documents(id) ON DELETE CASCADE
+                    )
+                """.trimIndent())
+
+                // Create indices
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_ocr_text_cache_documentId ON ocr_text_cache(documentId)")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_ocr_text_cache_documentId_pageIndex ON ocr_text_cache(documentId, pageIndex)")
             }
         }
 
@@ -38,11 +61,13 @@ abstract class PaperInkDatabase : RoomDatabase() {
                     "paper_ink_database"
                 )
                     .addMigrations(MIGRATION_1_2)
-                    .fallbackToDestructiveMigrationOnDowngrade()
+                    .fallbackToDestructiveMigration(dropAllTables = false)
                     .build()
                 INSTANCE = instance
                 instance
             }
         }
+
+        fun getInstance(context: Context): PaperInkDatabase = getDatabase(context)
     }
 }
