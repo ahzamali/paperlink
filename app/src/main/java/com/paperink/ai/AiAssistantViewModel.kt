@@ -71,7 +71,7 @@ class AiAssistantViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     fun checkModelAvailability() {
-        AiModelManager.checkStatus(getApplication())
+        AiModelManager.checkStatus(getApplication(), viewModelScope)
     }
 
     fun startModelDownload() {

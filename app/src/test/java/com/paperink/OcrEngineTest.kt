@@ -96,4 +96,22 @@ class OcrEngineTest {
         assertEquals(0f, deserialized[0].normLeft, 0.001f)
         assertEquals(1f, deserialized[0].normRight, 0.001f)
     }
+
+    @Test
+    fun testIsImageBased_withBoundaryCharacterCount() {
+        // Document with 3 pages. Threshold = max(3 * 30, 50) = 90 chars.
+        val map89Chars = mapOf(
+            0 to PdfEngine.ExtractedPageData(fullText = "A".repeat(30), spans = emptyList()),
+            1 to PdfEngine.ExtractedPageData(fullText = "B".repeat(30), spans = emptyList()),
+            2 to PdfEngine.ExtractedPageData(fullText = "C".repeat(29), spans = emptyList())
+        )
+        assertTrue(OcrEngine.isImageBased(map89Chars))
+
+        val map91Chars = mapOf(
+            0 to PdfEngine.ExtractedPageData(fullText = "A".repeat(30), spans = emptyList()),
+            1 to PdfEngine.ExtractedPageData(fullText = "B".repeat(30), spans = emptyList()),
+            2 to PdfEngine.ExtractedPageData(fullText = "C".repeat(31), spans = emptyList())
+        )
+        assertFalse(OcrEngine.isImageBased(map91Chars))
+    }
 }

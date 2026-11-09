@@ -276,17 +276,19 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
 
                         val bitmap = PdfEngine.renderPageBitmapForOcr(doc.filePath, pageIdx, targetWidth = 1080)
                         if (bitmap != null) {
-                            val extractedPage = OcrEngine.recognizePage(bitmap)
-                            bitmap.recycle()
+                            try {
+                                val extractedPage = OcrEngine.recognizePage(bitmap)
+                                pageDataMap[pageIdx] = extractedPage
 
-                            pageDataMap[pageIdx] = extractedPage
-
-                            repository.saveOcrCache(
-                                documentId = doc.id,
-                                pageIndex = pageIdx,
-                                fullText = extractedPage.fullText,
-                                spans = extractedPage.spans
-                            )
+                                repository.saveOcrCache(
+                                    documentId = doc.id,
+                                    pageIndex = pageIdx,
+                                    fullText = extractedPage.fullText,
+                                    spans = extractedPage.spans
+                                )
+                            } finally {
+                                bitmap.recycle()
+                            }
                         }
                     }
 
@@ -1037,5 +1039,11 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
                 _uiState.update { it.copy(userMessage = "Failed to export compressed file") }
             }
         }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        ocrJob?.cancel()
+        searchJob?.cancel()
     }
 }

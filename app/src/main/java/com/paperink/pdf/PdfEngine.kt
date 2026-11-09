@@ -553,38 +553,43 @@ object PdfEngine {
 
                         val pageInfo = PdfDocument.PageInfo.Builder(origW, origH, pageIdx + 1).create()
                         val pdfPage = pdfDoc.startPage(pageInfo)
-                        val canvas = pdfPage.canvas
+                        try {
+                            val canvas = pdfPage.canvas
 
-                        // 1. Render clean base image at crisp resolution
-                        val targetW = (origW * 1.5f).toInt().coerceIn(800, 2048)
-                        val scale = targetW.toFloat() / origW.toFloat()
-                        val targetH = (origH * scale).toInt().coerceIn(100, 4096)
+                            // 1. Render clean base image at crisp resolution using RGB_565 (50% memory saving)
+                            val targetW = (origW * 1.5f).toInt().coerceIn(800, 1800)
+                            val scale = targetW.toFloat() / origW.toFloat()
+                            val targetH = (origH * scale).toInt().coerceIn(100, 3600)
 
-                        val bitmap = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.ARGB_8888)
-                        val baseCanvas = Canvas(bitmap)
-                        baseCanvas.drawColor(Color.WHITE)
-                        page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
+                            val bitmap = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.RGB_565)
+                            try {
+                                val baseCanvas = Canvas(bitmap)
+                                baseCanvas.drawColor(Color.WHITE)
+                                page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
 
-                        // Draw background image scaled to page bounds
-                        val destRect = android.graphics.Rect(0, 0, origW, origH)
-                        canvas.drawBitmap(bitmap, null, destRect, null)
-                        bitmap.recycle()
-
-                        // 2. Draw invisible OCR text layer matching exact spatial coordinates
-                        val pageData = ocrDataByPage[pageIdx]
-                        if (pageData != null) {
-                            for (span in pageData.spans) {
-                                val spanLeft = span.normLeft * origW
-                                val spanTop = span.normTop * origH
-                                val spanBottom = span.normBottom * origH
-                                val spanHeight = (spanBottom - spanTop).coerceAtLeast(10f)
-
-                                textPaint.textSize = spanHeight * 0.85f
-                                canvas.drawText(span.text, spanLeft, spanBottom - spanHeight * 0.15f, textPaint)
+                                // Draw background image scaled to page bounds
+                                val destRect = android.graphics.Rect(0, 0, origW, origH)
+                                canvas.drawBitmap(bitmap, null, destRect, null)
+                            } finally {
+                                bitmap.recycle()
                             }
-                        }
 
-                        pdfDoc.finishPage(pdfPage)
+                            // 2. Draw invisible OCR text layer matching exact spatial coordinates
+                            val pageData = ocrDataByPage[pageIdx]
+                            if (pageData != null) {
+                                for (span in pageData.spans) {
+                                    val spanLeft = span.normLeft * origW
+                                    val spanTop = span.normTop * origH
+                                    val spanBottom = span.normBottom * origH
+                                    val spanHeight = (spanBottom - spanTop).coerceAtLeast(10f)
+
+                                    textPaint.textSize = spanHeight * 0.85f
+                                    canvas.drawText(span.text, spanLeft, spanBottom - spanHeight * 0.15f, textPaint)
+                                }
+                            }
+                        } finally {
+                            pdfDoc.finishPage(pdfPage)
+                        }
                     }
                 }
 

@@ -6,8 +6,10 @@ import androidx.test.core.app.ApplicationProvider
 import com.paperink.data.local.PaperInkDatabase
 import com.paperink.data.model.DocumentEntity
 import com.paperink.data.model.NormalizedPoint
+import com.paperink.data.model.OcrCacheEntity
 import com.paperink.data.model.PageAnnotationEntity
 import com.paperink.data.model.StrokeAnnotation
+import com.paperink.ai.AiModelManager
 import com.paperink.R
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -699,6 +701,89 @@ class ExampleRobolectricTest {
     } finally {
       sourcePdfFile.delete()
       destPdfFile.delete()
+    }
+  }
+
+  @Test
+  fun `room database supports OCR cache entity persistence and cascade delete on document removal`() = runBlocking {
+    val dao = db.paperInkDao()
+
+    val doc = DocumentEntity(
+        id = 100L,
+        title = "Scanned Contract.pdf",
+        fileName = "scanned.pdf",
+        filePath = "/path/scanned.pdf",
+        isImageBased = true,
+        ocrStatus = "IN_PROGRESS"
+    )
+    dao.insertDocument(doc)
+
+    val cachePage0 = OcrCacheEntity(
+        documentId = 100L,
+        pageIndex = 0,
+        fullText = "THIS AGREEMENT is entered into as of November 9, 2026",
+        spansJson = "[]",
+        createdAt = System.currentTimeMillis()
+    )
+    val cachePage1 = OcrCacheEntity(
+        documentId = 100L,
+        pageIndex = 1,
+        fullText = "IN WITNESS WHEREOF, the parties have executed this document.",
+        spansJson = "[]",
+        createdAt = System.currentTimeMillis()
+    )
+
+    dao.insertOcrCache(cachePage0)
+    dao.insertOcrCache(cachePage1)
+
+    // Verify insertion and retrieval
+    val retrieved = dao.getOcrCacheForDocument(100L)
+    assertEquals(2, retrieved.size)
+    assertEquals(0, retrieved[0].pageIndex)
+    assertTrue(retrieved[0].fullText.contains("AGREEMENT"))
+
+    val specificPage = dao.getOcrCacheForPage(100L, 1)
+    org.junit.Assert.assertNotNull(specificPage)
+    assertTrue(specificPage!!.fullText.contains("WITNESS"))
+
+    // Update document status
+    dao.updateOcrStatus(100L, isImage = false, status = "DONE")
+    val updatedDoc = dao.getDocumentById(100L)
+    org.junit.Assert.assertNotNull(updatedDoc)
+    org.junit.Assert.assertFalse(updatedDoc!!.isImageBased)
+    assertEquals("DONE", updatedDoc.ocrStatus)
+
+    // Delete document and verify cascade
+    dao.deleteDocumentById(100L)
+    val emptyCaches = dao.getOcrCacheForDocument(100L)
+    assertTrue("OCR cache must be empty after document cascade deletion", emptyCaches.isEmpty())
+  }
+
+  @Test
+  fun `AiModelManager checkStatus detects missing model as NotDownloaded`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    AiModelManager.checkStatus(context)
+    val status = AiModelManager.status.value
+    assertTrue("When model file is absent, status must be NotDownloaded", status is AiModelManager.ModelStatus.NotDownloaded)
+  }
+
+  @Test
+  fun `AiModelManager checkStatus recognizes existing valid model file`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val modelsDir = context.getExternalFilesDir("models")
+    org.junit.Assert.assertNotNull(modelsDir)
+    val dummyModel = java.io.File(modelsDir, AiModelManager.MODEL_FILENAME)
+    try {
+      java.io.RandomAccessFile(dummyModel, "rw").use { raf ->
+        raf.setLength(600_000_000L) // > 500MB
+      }
+      AiModelManager.checkStatus(context)
+      val status = AiModelManager.status.value
+      assertTrue("When valid model exists, status must be Ready", status is AiModelManager.ModelStatus.Ready)
+      assertEquals(dummyModel.absolutePath, (status as AiModelManager.ModelStatus.Ready).modelFile.absolutePath)
+    } finally {
+      if (dummyModel.exists()) dummyModel.delete()
+      AiModelManager.checkStatus(context)
     }
   }
 }

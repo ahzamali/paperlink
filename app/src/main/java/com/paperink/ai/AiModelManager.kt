@@ -78,13 +78,60 @@ object AiModelManager {
         return null
     }
 
-    fun checkStatus(context: Context) {
+    private const val PREFS_NAME = "ai_model_prefs"
+    private const val KEY_DOWNLOAD_ID = "active_download_id"
+
+    private fun getSavedDownloadId(context: Context): Long {
+        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getLong(KEY_DOWNLOAD_ID, -1L)
+    }
+
+    private fun saveDownloadId(context: Context, id: Long) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putLong(KEY_DOWNLOAD_ID, id)
+            .apply()
+    }
+
+    fun checkStatus(context: Context, coroutineScope: CoroutineScope? = null) {
         val existing = findExistingModelFile(context)
         if (existing != null) {
+            saveDownloadId(context, -1L)
             _status.value = ModelStatus.Ready(existing)
-        } else if (activeDownloadId == -1L) {
-            _status.value = ModelStatus.NotDownloaded
+            return
         }
+
+        val savedId = if (activeDownloadId != -1L) activeDownloadId else getSavedDownloadId(context)
+        if (savedId != -1L) {
+            activeDownloadId = savedId
+            val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+            val cursor = downloadManager.query(DownloadManager.Query().setFilterById(savedId))
+            if (cursor != null && cursor.moveToFirst()) {
+                val statusIdx = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS)
+                val status = if (statusIdx >= 0) cursor.getInt(statusIdx) else -1
+                cursor.close()
+
+                if (status == DownloadManager.STATUS_RUNNING || status == DownloadManager.STATUS_PENDING || status == DownloadManager.STATUS_PAUSED) {
+                    val targetDir = context.getExternalFilesDir("models") ?: context.filesDir
+                    val targetFile = File(targetDir, MODEL_FILENAME)
+                    if (coroutineScope != null) {
+                        startPollingProgress(context, downloadManager, savedId, targetFile, coroutineScope)
+                    }
+                    return
+                } else if (status == DownloadManager.STATUS_FAILED) {
+                    saveDownloadId(context, -1L)
+                    activeDownloadId = -1L
+                    _status.value = ModelStatus.NotDownloaded
+                    return
+                }
+            } else {
+                cursor?.close()
+                saveDownloadId(context, -1L)
+                activeDownloadId = -1L
+            }
+        }
+
+        _status.value = ModelStatus.NotDownloaded
     }
 
     fun startDownload(context: Context, coroutineScope: CoroutineScope) {
@@ -108,13 +155,14 @@ object AiModelManager {
             .setTitle("PaperInk AI - Gemma 4 2B")
             .setDescription("Downloading on-device intelligence model (~2.6 GB)...")
             .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-            .setDestinationUri(Uri.fromFile(targetFile))
+            .setDestinationInExternalFilesDir(context, "models", MODEL_FILENAME)
             .setAllowedOverMetered(true)
             .setAllowedOverRoaming(false)
 
         try {
             val downloadId = downloadManager.enqueue(request)
             activeDownloadId = downloadId
+            saveDownloadId(context, downloadId)
             _status.value = ModelStatus.Downloading(0f, 0L, ESTIMATED_SIZE_BYTES)
 
             startPollingProgress(context, downloadManager, downloadId, targetFile, coroutineScope)
@@ -153,6 +201,7 @@ object AiModelManager {
                         DownloadManager.STATUS_SUCCESSFUL -> {
                             cursor.close()
                             activeDownloadId = -1L
+                            saveDownloadId(context, -1L)
                             if (targetFile.exists() && targetFile.length() > 500_000_000L) {
                                 _status.value = ModelStatus.Ready(targetFile)
                             } else {
@@ -163,6 +212,7 @@ object AiModelManager {
                         DownloadManager.STATUS_FAILED -> {
                             cursor.close()
                             activeDownloadId = -1L
+                            saveDownloadId(context, -1L)
                             _status.value = ModelStatus.Error("Download failed. Please check internet connection.")
                             return@launch
                         }
@@ -178,10 +228,12 @@ object AiModelManager {
     }
 
     fun cancelDownload(context: Context) {
-        if (activeDownloadId != -1L) {
+        val savedId = if (activeDownloadId != -1L) activeDownloadId else getSavedDownloadId(context)
+        if (savedId != -1L) {
             val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-            downloadManager.remove(activeDownloadId)
+            downloadManager.remove(savedId)
             activeDownloadId = -1L
+            saveDownloadId(context, -1L)
         }
         progressPollingJob?.cancel()
         progressPollingJob = null
