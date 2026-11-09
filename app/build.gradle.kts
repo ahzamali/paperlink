@@ -16,8 +16,8 @@ android {
     applicationId = "com.paperink"
     minSdk = 24
     targetSdk = 36
-    versionCode = 6
-    versionName = "1.0.6-beta"
+    versionCode = 7
+    versionName = "2.0.1-beta"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
