@@ -70,6 +70,7 @@ data class ReaderUiState(
     val showOcrPrompt: Boolean = false,
     // AI Assistant (Gemma 4 2B)
     val showAiAssistant: Boolean = false,
+    val documentText: String = "",
     // Compression
     val isCompressing: Boolean = false,
     val compressionResult: CompressionResult? = null,
@@ -221,14 +222,24 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
                 )
             }
             PdfEngine.setExtractedPageData(doc.filePath, pageDataMap)
-            _uiState.update { it.copy(showOcrPrompt = false) }
+            val fullText = pageDataMap.toSortedMap().values
+                .map { it.fullText.trim() }
+                .filter { it.isNotBlank() }
+                .joinToString("\n\n")
+            _uiState.update { it.copy(showOcrPrompt = false, documentText = fullText) }
         } else {
             // Check native text streams
             val extracted = PdfEngine.getOrExtractText(doc.filePath, doc.pageCount)
             val isImage = OcrEngine.isImageBased(extracted)
+            val fullText = extracted.toSortedMap().values
+                .map { it.fullText.trim() }
+                .filter { it.isNotBlank() }
+                .joinToString("\n\n")
             if (isImage) {
                 repository.updateDocumentOcrStatus(doc.id, isImageBased = true, ocrStatus = doc.ocrStatus)
-                _uiState.update { it.copy(showOcrPrompt = doc.ocrStatus != "DONE") }
+                _uiState.update { it.copy(showOcrPrompt = doc.ocrStatus != "DONE", documentText = fullText) }
+            } else {
+                _uiState.update { it.copy(documentText = fullText) }
             }
         }
     }
@@ -293,6 +304,11 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
                     }
 
                     PdfEngine.setExtractedPageData(finalPath, pageDataMap)
+                    val fullText = pageDataMap.toSortedMap().values
+                        .map { it.fullText.trim() }
+                        .filter { it.isNotBlank() }
+                        .joinToString("\n\n")
+
                     val updatedDoc = doc.copy(
                         filePath = finalPath,
                         isImageBased = false,
@@ -304,6 +320,7 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
                     _uiState.update {
                         it.copy(
                             document = updatedDoc,
+                            documentText = fullText,
                             isOcrScanning = false,
                             showOcrPrompt = false,
                             userMessage = if (isCreated) "OCR complete! Searchable text PDF created." else "OCR complete! Search enabled on document."
@@ -335,10 +352,16 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun getDocumentTextSnippet(): String {
+        val currentText = _uiState.value.documentText
+        if (currentText.isNotBlank()) return currentText
+
         val doc = _uiState.value.document ?: return ""
         val cached = PdfEngine.getExtractedPageData(doc.filePath)
         if (!cached.isNullOrEmpty()) {
-            return cached.values.joinToString("\n\n") { it.fullText.trim() }
+            return cached.toSortedMap().values
+                .map { it.fullText.trim() }
+                .filter { it.isNotBlank() }
+                .joinToString("\n\n")
         }
         return ""
     }

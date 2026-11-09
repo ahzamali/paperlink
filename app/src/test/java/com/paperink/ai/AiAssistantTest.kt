@@ -46,5 +46,17 @@ class AiAssistantTest {
         assertFalse(state.isBusy)
         assertTrue(state.messages.isEmpty())
         assertEquals("None", state.activeBackend)
+        assertEquals("", state.documentTitle)
+        assertEquals("", state.documentTextSnippet)
+    }
+
+    @Test
+    fun testAiChatState_withDocumentContext() {
+        val state = AiChatState(
+            documentTitle = "Quarterly Report.pdf",
+            documentTextSnippet = "Revenue grew 14% year over year."
+        )
+        assertEquals("Quarterly Report.pdf", state.documentTitle)
+        assertEquals("Revenue grew 14% year over year.", state.documentTextSnippet)
     }
 }

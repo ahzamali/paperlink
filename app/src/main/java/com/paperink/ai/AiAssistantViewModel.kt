@@ -83,11 +83,19 @@ class AiAssistantViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     fun setDocumentContext(title: String, textSnippet: String) {
-        _state.update {
-            it.copy(
-                documentTitle = title,
-                documentTextSnippet = textSnippet.take(12_000) // Fit context window comfortably
-            )
+        val snippet = textSnippet.take(24_000).trim()
+        val titleChanged = _state.value.documentTitle != title
+        val textChanged = _state.value.documentTextSnippet != snippet
+        if (titleChanged || textChanged) {
+            _state.update {
+                it.copy(
+                    documentTitle = title,
+                    documentTextSnippet = snippet
+                )
+            }
+            if (_state.value.isEngineReady) {
+                restartConversationWithCurrentDocument()
+            }
         }
     }
 
@@ -151,7 +159,7 @@ class AiAssistantViewModel(application: Application) : AndroidViewModel(applicat
                     }
                 }
 
-                // Create initial conversation
+                // Create initial conversation primed with document context
                 try {
                     val systemPrompt = buildSystemPrompt()
                     conversation = checkNotNull(engine).createConversation(
@@ -178,17 +186,31 @@ class AiAssistantViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     private fun buildSystemPrompt(): String {
-        val title = _state.value.documentTitle
+        val title = _state.value.documentTitle.ifBlank { "Current Document" }
         val snippet = _state.value.documentTextSnippet
         val contextPart = if (snippet.isNotBlank()) {
-            "\n\nDOCUMENT CONTEXT (Title: $title):\n\"\"\"\n$snippet\n\"\"\"\n"
+            """
+            
+            === ATTACHED PDF DOCUMENT CONTEXT ===
+            Document Title: $title
+            
+            Document Text:
+            $snippet
+            === END OF DOCUMENT CONTEXT ===
+            
+            INSTRUCTIONS:
+            - You have full access to the attached PDF document text above.
+            - Answer questions, provide summaries, and extract insights directly based on this document content.
+            - Cite specific facts, sections, or details from the document.
+            - If a question asks about details not present in the document, clarify what is in the document and what is missing.
+            """.trimIndent()
         } else {
-            ""
+            "\n\nNOTE: No document text is available yet for this document. If asked about the document, inform the user to make sure the PDF has readable text or run OCR if it is a scanned document."
         }
         return """
             You are PaperInk AI, a helpful, precise on-device reading assistant powered by Gemma 4 2B.
-            Your job is to summarize documents, answer user questions, and extract insights directly from the provided PDF text.
-            If the user asks questions about the document, rely strictly on the provided context where possible. Keep answers clear, well-structured, and concise.
+            Your purpose is to help the user understand, analyze, summarize, and answer questions about their PDF documents.
+            Always provide clear, well-structured, and helpful answers.
             $contextPart
         """.trimIndent()
     }
@@ -226,7 +248,15 @@ class AiAssistantViewModel(application: Application) : AndroidViewModel(applicat
 
         scope.launch {
             try {
-                val conv = checkNotNull(conversation) { "Conversation not ready" }
+                val eng = checkNotNull(engine) { "Engine not ready" }
+                var conv = conversation
+                if (conv == null) {
+                    val systemPrompt = buildSystemPrompt()
+                    conv = eng.createConversation(
+                        ConversationConfig(systemInstruction = Contents.of(systemPrompt))
+                    )
+                    conversation = conv
+                }
                 val stream = conv.sendMessageAsync(text)
 
                 stream.collect { chunk ->

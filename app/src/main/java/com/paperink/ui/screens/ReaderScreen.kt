@@ -209,6 +209,14 @@ fun ReaderScreen(
             }
     }
 
+    // Keep AI Assistant continuously synchronized with document text and OCR extraction
+    LaunchedEffect(uiState.document?.id, uiState.documentText) {
+        val title = uiState.document?.title ?: "Document"
+        if (uiState.documentText.isNotBlank()) {
+            aiViewModel.setDocumentContext(title, uiState.documentText)
+        }
+    }
+
     val pageBackground = when (uiState.readingMode) {
         ReadingMode.NORMAL -> Color(0xFFE2E8F0)
         ReadingMode.NIGHT -> Color(0xFF0F172A)
