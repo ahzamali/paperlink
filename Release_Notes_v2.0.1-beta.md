@@ -42,4 +42,4 @@ PaperInk PDF transitions to **v2.0.1-beta**, introducing on-device OCR text reco
 - Responsive Material 3 Bottom Sheets and Floating Action Buttons.
 
 #### 🧪 Testing & Verification
-- **38 automated tests** passing (`:app:testDebugUnitTest`), covering core reader operations, PDF shadows, OCR engine span serialization, Room database migrations, and AI Assistant context budgeting.
+- **54 automated tests** passing with 100% pass rate (`:app:testDebugUnitTest`), covering core reader operations, PDF shadows, OCR engine span serialization, Room database migrations, multi-page PDF text extraction (up to 47 pages), search highlights, and AI Assistant context budgeting & soft keyboard navigation.
