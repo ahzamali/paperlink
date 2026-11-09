@@ -209,11 +209,17 @@ fun ReaderScreen(
             }
     }
 
-    // Keep AI Assistant continuously synchronized with document text and OCR extraction
-    LaunchedEffect(uiState.document?.id, uiState.documentText) {
-        val title = uiState.document?.title ?: "Document"
-        if (uiState.documentText.isNotBlank()) {
-            aiViewModel.setDocumentContext(title, uiState.documentText)
+    // Keep AI Assistant continuously synchronized with document text, current page, and OCR extraction
+    LaunchedEffect(uiState.document?.id, uiState.currentPageIndex, uiState.documentText) {
+        val info = viewModel.getDocumentContextInfo()
+        if (info.fallbackSnippet.isNotBlank() || info.pagesText.isNotEmpty()) {
+            aiViewModel.setDocumentContext(
+                title = info.title,
+                currentPageIndex = info.currentPageIndex,
+                totalPages = info.totalPages,
+                pagesText = info.pagesText,
+                fallbackSnippet = info.fallbackSnippet
+            )
         }
     }
 
@@ -822,9 +828,14 @@ fun ReaderScreen(
         floatingActionButton = {
             FloatingActionButton(
                 onClick = {
-                    val title = uiState.document?.title ?: "Document"
-                    val snippet = viewModel.getDocumentTextSnippet()
-                    aiViewModel.setDocumentContext(title, snippet)
+                    val info = viewModel.getDocumentContextInfo()
+                    aiViewModel.setDocumentContext(
+                        title = info.title,
+                        currentPageIndex = info.currentPageIndex,
+                        totalPages = info.totalPages,
+                        pagesText = info.pagesText,
+                        fallbackSnippet = info.fallbackSnippet
+                    )
                     viewModel.openAiAssistant()
                 },
                 containerColor = com.paperink.ui.theme.OceanBlue,

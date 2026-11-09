@@ -27,9 +27,10 @@ PaperInk PDF transitions to **v2.0.1-beta**, introducing on-device OCR text reco
 #### 🤖 Gemma 4 2B On-Device AI Assistant
 - **LiteRT-LM On-Device LLM**: Integrates `com.google.ai.edge.litertlm:litertlm-android:0.18.0` with Kotlin toolchain for on-device reasoning.
 - **Hardware Acceleration**: Automatic GPU acceleration using OpenCL with seamless fallback to CPU mode.
-- **Document Context Injection**: Automatically injects document text and OCR output into Gemma's prompt window (up to 24,000 characters) for context-grounded answers.
+- **Smart Context Budgeting & Local RAG**: Resolves "context too long" errors by strictly budgeting context to 3,500 characters (~850 tokens). Dynamically switches between **Current Page Focus**, **Local RAG Keyword Matching**, and **Document Overview Sampling** to handle documents of any size.
+- **Auto-Recovery on Context Limits**: Automatically detects sequence limit errors, resets KV cache, and retries with condensed context.
 - **Quick Action Prompts**:
-  - 📄 **Summarize PDF**: Generates structured summaries with key takeaways and bullet points.
+  - 📄 **Page Summary & Doc Summary**: Fast page-level or full-document summaries.
   - 🔑 **Key Takeaways**: Extracts core insights and conclusions.
   - 📋 **Action Items**: Extracts actionable next steps, deadlines, and recommendations.
   - 💬 **Interactive Q&A**: Multi-turn conversational chat with streaming tokens and one-tap copy-to-clipboard.
@@ -41,4 +42,4 @@ PaperInk PDF transitions to **v2.0.1-beta**, introducing on-device OCR text reco
 - Responsive Material 3 Bottom Sheets and Floating Action Buttons.
 
 #### 🧪 Testing & Verification
-- **36 automated tests** passing (`:app:testDebugUnitTest`), covering core reader operations, PDF shadows, OCR engine span serialization, Room database migrations, and AI Assistant states.
+- **38 automated tests** passing (`:app:testDebugUnitTest`), covering core reader operations, PDF shadows, OCR engine span serialization, Room database migrations, and AI Assistant context budgeting.

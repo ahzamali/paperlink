@@ -353,6 +353,35 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.update { it.copy(showAiAssistant = false) }
     }
 
+    data class DocumentContextInfo(
+        val title: String,
+        val currentPageIndex: Int,
+        val totalPages: Int,
+        val pagesText: Map<Int, String>,
+        val fallbackSnippet: String
+    )
+
+    fun getAllPagesText(): Map<Int, String> {
+        val doc = _uiState.value.document ?: return emptyMap()
+        val cached = PdfEngine.getExtractedPageData(doc.filePath) ?: return emptyMap()
+        return cached.mapValues { it.value.fullText.trim() }.filterValues { it.isNotBlank() }
+    }
+
+    fun getDocumentContextInfo(): DocumentContextInfo {
+        val title = _uiState.value.document?.title ?: "Document"
+        val currentPage = _uiState.value.currentPageIndex
+        val totalPages = _uiState.value.totalPages.coerceAtLeast(1)
+        val pagesText = getAllPagesText()
+        val fallback = getDocumentTextSnippet()
+        return DocumentContextInfo(
+            title = title,
+            currentPageIndex = currentPage,
+            totalPages = totalPages,
+            pagesText = pagesText,
+            fallbackSnippet = fallback
+        )
+    }
+
     fun getDocumentTextSnippet(): String {
         val currentText = _uiState.value.documentText
         if (currentText.isNotBlank()) return currentText

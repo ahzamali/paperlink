@@ -66,6 +66,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.paperink.ai.AiAssistantViewModel
+import com.paperink.ai.ContextScopeMode
 import com.paperink.ai.AiModelManager
 import com.paperink.ai.ChatMessage
 import com.paperink.ui.theme.OceanBlue
@@ -246,12 +247,55 @@ fun AiAssistantBottomSheet(
                             )
                         }
                     } else {
+                        // Context Scope Selector Chips
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp, vertical = 2.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Scope:",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            FilterChip(
+                                selected = state.contextScopeMode == ContextScopeMode.CURRENT_PAGE,
+                                onClick = { viewModel.setContextScopeMode(ContextScopeMode.CURRENT_PAGE) },
+                                label = { Text("📌 Page ${state.currentPageIndex + 1}", fontSize = 11.sp) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = OceanBlue,
+                                    selectedLabelColor = Color.White
+                                )
+                            )
+                            FilterChip(
+                                selected = state.contextScopeMode == ContextScopeMode.RELEVANT_SECTIONS,
+                                onClick = { viewModel.setContextScopeMode(ContextScopeMode.RELEVANT_SECTIONS) },
+                                label = { Text("🔍 Search Doc", fontSize = 11.sp) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = OceanBlue,
+                                    selectedLabelColor = Color.White
+                                )
+                            )
+                            FilterChip(
+                                selected = state.contextScopeMode == ContextScopeMode.DOCUMENT_OVERVIEW,
+                                onClick = { viewModel.setContextScopeMode(ContextScopeMode.DOCUMENT_OVERVIEW) },
+                                label = { Text("📚 Overview", fontSize = 11.sp) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = OceanBlue,
+                                    selectedLabelColor = Color.White
+                                )
+                            )
+                        }
+
                         // Document Context Status Bar
-                        if (state.documentTextSnippet.isNotBlank()) {
+                        if (state.activeContextSnippet.isNotBlank() || state.documentTextSnippet.isNotBlank()) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 20.dp, vertical = 4.dp),
+                                    .padding(horizontal = 20.dp, vertical = 2.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Box(
@@ -262,7 +306,11 @@ fun AiAssistantBottomSheet(
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = "PDF Context Attached (${state.documentTextSnippet.length} characters)",
+                                    text = if (state.contextSummaryBadge.isNotBlank()) {
+                                        "${state.contextSummaryBadge} • Safe Context"
+                                    } else {
+                                        "Context Attached (${state.activeContextSnippet.length} chars) • Safe Context"
+                                    },
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -288,14 +336,25 @@ fun AiAssistantBottomSheet(
                         FlowRow(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 20.dp, vertical = 6.dp),
+                                .padding(horizontal = 20.dp, vertical = 4.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
+                            if (state.totalPages > 1) {
+                                FilterChip(
+                                    selected = false,
+                                    onClick = { viewModel.summarizeCurrentPage() },
+                                    label = { Text("📄 Page Summary", fontSize = 11.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        containerColor = OceanContainer.copy(alpha = 0.5f),
+                                        labelColor = OceanOnContainer
+                                    )
+                                )
+                            }
                             FilterChip(
                                 selected = false,
                                 onClick = { viewModel.summarizeDocument() },
-                                label = { Text("📄 Summarize PDF", fontSize = 12.sp) },
+                                label = { Text("📚 Doc Summary", fontSize = 11.sp) },
                                 colors = FilterChipDefaults.filterChipColors(
                                     containerColor = OceanContainer.copy(alpha = 0.5f),
                                     labelColor = OceanOnContainer
@@ -304,7 +363,7 @@ fun AiAssistantBottomSheet(
                             FilterChip(
                                 selected = false,
                                 onClick = { viewModel.extractKeyTakeaways() },
-                                label = { Text("🔑 Key Takeaways", fontSize = 12.sp) },
+                                label = { Text("🔑 Key Takeaways", fontSize = 11.sp) },
                                 colors = FilterChipDefaults.filterChipColors(
                                     containerColor = OceanContainer.copy(alpha = 0.5f),
                                     labelColor = OceanOnContainer
@@ -313,7 +372,7 @@ fun AiAssistantBottomSheet(
                             FilterChip(
                                 selected = false,
                                 onClick = { viewModel.extractActionItems() },
-                                label = { Text("📋 Action Items", fontSize = 12.sp) },
+                                label = { Text("📋 Action Items", fontSize = 11.sp) },
                                 colors = FilterChipDefaults.filterChipColors(
                                     containerColor = OceanContainer.copy(alpha = 0.5f),
                                     labelColor = OceanOnContainer
@@ -322,8 +381,8 @@ fun AiAssistantBottomSheet(
                             if (state.messages.isNotEmpty()) {
                                 FilterChip(
                                     selected = false,
-                                    onClick = { viewModel.restartConversationWithCurrentDocument() },
-                                    label = { Text("🔄 Clear", fontSize = 12.sp) },
+                                    onClick = { viewModel.resetChat() },
+                                    label = { Text("🔄 Reset", fontSize = 11.sp) },
                                     colors = FilterChipDefaults.filterChipColors(
                                         containerColor = MaterialTheme.colorScheme.surfaceVariant,
                                         labelColor = MaterialTheme.colorScheme.onSurfaceVariant

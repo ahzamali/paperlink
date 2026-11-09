@@ -17,8 +17,12 @@ A modern, fast, privacy-focused Android PDF reader, annotator, and organizer cra
 
 ### 🤖 On-Device AI Assistant (Gemma 4 2B)
 - **100% Private, Local LLM**: Powered by Google Gemma 4 2B (`gemma-4-E2B-it.litertlm`) via Google's official `litertlm-android` Kotlin API. No prompts or document contents are ever transmitted to any cloud servers.
-- **Hardware-Accelerated Inference**: Automatic GPU shader acceleration via OpenCL with seamless fallback to multi-threaded CPU inference.
-- **Document Context Ingestion**: Automatically extracts and injects up to 24,000 characters of in-document text and OCR output into Gemma's prompt window for context-grounded, factual answers.
+- **Smart Context Budgeting & Local RAG**: Intelligently prevents on-device small model KV-cache overflow (`context too long`) using a safe 3,500 character context budget (~850 tokens), leaving ample space for conversational turns and generated answers within Gemma 2B's 2048 token limit.
+- **Three Dynamic Context Scoping Modes**:
+  - 📌 **Current Page Focus**: Feeds the user's active reading page for instant, zero-overflow explanations and page summaries.
+  - 🔍 **Local RAG (Keyword Matching)**: Automatically scores all document pages against query keywords to extract only the most relevant passages across large multi-page PDFs.
+  - 📚 **Smart Document Overview**: Dynamically samples introduction, key middle sections, and concluding pages to summarize whole books or contracts within safe token boundaries.
+- **Automatic Context Overflow Recovery**: Senses context sequence limits, prunes multi-turn conversation history, halves context budget, and recovers automatically without failing the user's query.
 - **Instant Document Intelligence**:
   - 📄 **Summarize PDF**: Generates structured summaries with key takeaways and bullet points.
   - 🔑 **Key Takeaways**: Extracts core insights, themes, and conclusions.
