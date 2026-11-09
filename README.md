@@ -1,6 +1,6 @@
 # PaperInk PDF (Paperlink)
 
-[![Release](https://img.shields.io/badge/Release-v2.0.1--beta-orange.svg)](https://github.com/ahzamali/paperlink/releases)
+[![Release](https://img.shields.io/badge/Release-v2.0.2--beta-orange.svg)](https://github.com/ahzamali/paperlink/releases)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Android%208.0%2B%20(API%2026%2B)-green.svg)](https://developer.android.com)
 [![Target SDK](https://img.shields.io/badge/Target%20SDK-36%20(Android%2015)-brightgreen.svg)](https://developer.android.com/about/versions/15)
