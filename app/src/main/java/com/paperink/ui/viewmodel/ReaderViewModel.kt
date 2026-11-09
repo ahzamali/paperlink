@@ -263,7 +263,7 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
                             )
                         }
 
-                        val bitmap = PdfEngine.renderPageBitmap(doc.filePath, pageIdx, targetWidth = 1500)
+                        val bitmap = PdfEngine.renderPageBitmapForOcr(doc.filePath, pageIdx, targetWidth = 1080)
                         if (bitmap != null) {
                             val extractedPage = OcrEngine.recognizePage(bitmap)
                             bitmap.recycle()
@@ -279,16 +279,36 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
                         }
                     }
 
-                    PdfEngine.setExtractedPageData(doc.filePath, pageDataMap)
-                    repository.updateDocumentOcrStatus(doc.id, isImageBased = true, ocrStatus = "DONE")
-                }
+                    // Create new standardized searchable text-based PDF
+                    val app = getApplication<Application>()
+                    val searchableDir = File(app.filesDir, "searchable_pdfs").apply { if (!exists()) mkdirs() }
+                    val baseName = File(doc.filePath).nameWithoutExtension
+                    val searchableFile = File(searchableDir, "${baseName}_searchable.pdf")
+                    val isCreated = PdfEngine.createSearchablePdf(doc.filePath, searchableFile, pageDataMap)
 
-                _uiState.update {
-                    it.copy(
-                        isOcrScanning = false,
-                        showOcrPrompt = false,
-                        userMessage = "OCR complete! Search enabled on document."
+                    val finalPath = if (isCreated && searchableFile.exists() && searchableFile.length() > 0) {
+                        searchableFile.absolutePath
+                    } else {
+                        doc.filePath
+                    }
+
+                    PdfEngine.setExtractedPageData(finalPath, pageDataMap)
+                    val updatedDoc = doc.copy(
+                        filePath = finalPath,
+                        isImageBased = false,
+                        ocrStatus = "DONE"
                     )
+                    repository.updateDocument(updatedDoc)
+                    PdfEngine.clearCache()
+
+                    _uiState.update {
+                        it.copy(
+                            document = updatedDoc,
+                            isOcrScanning = false,
+                            showOcrPrompt = false,
+                            userMessage = if (isCreated) "OCR complete! Searchable text PDF created." else "OCR complete! Search enabled on document."
+                        )
+                    }
                 }
 
                 if (_uiState.value.pdfSearchQuery.isNotBlank()) {

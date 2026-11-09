@@ -78,4 +78,22 @@ class OcrEngineTest {
         val result = OcrEngine.deserializeSpans(invalid)
         assertTrue(result.isEmpty())
     }
+
+    @Test
+    fun testSpanCoordinateClamping() {
+        val spans = listOf(
+            PdfEngine.PositionedTextSpan(
+                text = "Boundary Check",
+                normLeft = 0f,
+                normTop = 0f,
+                normRight = 1f,
+                normBottom = 1f
+            )
+        )
+        val json = OcrEngine.serializeSpans(spans)
+        val deserialized = OcrEngine.deserializeSpans(json)
+        assertEquals(1, deserialized.size)
+        assertEquals(0f, deserialized[0].normLeft, 0.001f)
+        assertEquals(1f, deserialized[0].normRight, 0.001f)
+    }
 }

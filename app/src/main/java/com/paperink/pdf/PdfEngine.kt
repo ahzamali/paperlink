@@ -432,10 +432,20 @@ object PdfEngine {
         targetWidth: Int = 1200
     ): Bitmap? = withContext(Dispatchers.IO) {
         val cacheKey = "${filePath}_${pageIndex}_$targetWidth"
-        memoryCache.get(cacheKey)?.let { return@withContext it }
+        val existing = memoryCache.get(cacheKey)
+        if (existing != null && !existing.isRecycled) {
+            return@withContext existing
+        } else if (existing != null && existing.isRecycled) {
+            memoryCache.remove(cacheKey)
+        }
 
         synchronized(rendererLock) {
-            memoryCache.get(cacheKey)?.let { return@withContext it }
+            val cachedInLock = memoryCache.get(cacheKey)
+            if (cachedInLock != null && !cachedInLock.isRecycled) {
+                return@withContext cachedInLock
+            } else if (cachedInLock != null && cachedInLock.isRecycled) {
+                memoryCache.remove(cacheKey)
+            }
 
             val renderer = getOrCreateRenderer(filePath) ?: return@withContext null
             if (pageIndex < 0 || pageIndex >= renderer.pageCount) return@withContext null
@@ -473,7 +483,121 @@ object PdfEngine {
                 }
             } catch (e: Throwable) {
                 e.printStackTrace()
+                // If renderer is corrupted, close it to allow fresh recovery on next attempt
+                closeRenderer()
                 null
+            }
+        }
+    }
+
+    /**
+     * Isolated, un-cached page rendering specifically for background OCR text recognition.
+     * Keeps UI memory cache clean and avoids holding huge bitmaps or recycled references.
+     */
+    suspend fun renderPageBitmapForOcr(
+        filePath: String,
+        pageIndex: Int,
+        targetWidth: Int = 1080
+    ): Bitmap? = withContext(Dispatchers.IO) {
+        synchronized(rendererLock) {
+            val renderer = getOrCreateRenderer(filePath) ?: return@withContext null
+            if (pageIndex < 0 || pageIndex >= renderer.pageCount) return@withContext null
+
+            try {
+                renderer.openPage(pageIndex).use { page ->
+                    val originalWidth = if (page.width > 0) page.width else 600
+                    val originalHeight = if (page.height > 0) page.height else 850
+                    val scale = targetWidth.toFloat() / originalWidth.toFloat()
+                    val targetHeight = ((originalHeight * scale).toInt()).coerceIn(100, 3000)
+
+                    val bitmap = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
+                    val canvas = Canvas(bitmap)
+                    canvas.drawColor(Color.WHITE)
+                    page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                    bitmap
+                }
+            } catch (e: Throwable) {
+                e.printStackTrace()
+                null
+            }
+        }
+    }
+
+    /**
+     * Converts an image-based/scanned PDF into a standard searchable text-based PDF by
+     * writing the rendered background pages and overlaying an invisible text layer from OCR
+     * at their exact spatial coordinates.
+     */
+    suspend fun createSearchablePdf(
+        sourceFilePath: String,
+        outputFile: File,
+        ocrDataByPage: Map<Int, ExtractedPageData>
+    ): Boolean = withContext(Dispatchers.IO) {
+        synchronized(rendererLock) {
+            val renderer = getOrCreateRenderer(sourceFilePath) ?: return@withContext false
+            val pdfDoc = PdfDocument()
+            val textPaint = Paint().apply {
+                // Invisible text with tiny opacity (1/255) ensures glyphs and bounding boxes
+                // are preserved in PDF operators for selection and search across all PDF readers
+                color = Color.argb(1, 0, 0, 0)
+                isAntiAlias = true
+                typeface = Typeface.DEFAULT
+            }
+
+            try {
+                val totalPages = renderer.pageCount
+                for (pageIdx in 0 until totalPages) {
+                    renderer.openPage(pageIdx).use { page ->
+                        val origW = if (page.width > 0) page.width else 600
+                        val origH = if (page.height > 0) page.height else 850
+
+                        val pageInfo = PdfDocument.PageInfo.Builder(origW, origH, pageIdx + 1).create()
+                        val pdfPage = pdfDoc.startPage(pageInfo)
+                        val canvas = pdfPage.canvas
+
+                        // 1. Render clean base image at crisp resolution
+                        val targetW = (origW * 1.5f).toInt().coerceIn(800, 2048)
+                        val scale = targetW.toFloat() / origW.toFloat()
+                        val targetH = (origH * scale).toInt().coerceIn(100, 4096)
+
+                        val bitmap = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.ARGB_8888)
+                        val baseCanvas = Canvas(bitmap)
+                        baseCanvas.drawColor(Color.WHITE)
+                        page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
+
+                        // Draw background image scaled to page bounds
+                        val destRect = android.graphics.Rect(0, 0, origW, origH)
+                        canvas.drawBitmap(bitmap, null, destRect, null)
+                        bitmap.recycle()
+
+                        // 2. Draw invisible OCR text layer matching exact spatial coordinates
+                        val pageData = ocrDataByPage[pageIdx]
+                        if (pageData != null) {
+                            for (span in pageData.spans) {
+                                val spanLeft = span.normLeft * origW
+                                val spanTop = span.normTop * origH
+                                val spanBottom = span.normBottom * origH
+                                val spanHeight = (spanBottom - spanTop).coerceAtLeast(10f)
+
+                                textPaint.textSize = spanHeight * 0.85f
+                                canvas.drawText(span.text, spanLeft, spanBottom - spanHeight * 0.15f, textPaint)
+                            }
+                        }
+
+                        pdfDoc.finishPage(pdfPage)
+                    }
+                }
+
+                FileOutputStream(outputFile).use { out ->
+                    pdfDoc.writeTo(out)
+                }
+                true
+            } catch (e: Exception) {
+                e.printStackTrace()
+                try { outputFile.delete() } catch (_: Exception) {}
+                false
+            } finally {
+                pdfDoc.close()
             }
         }
     }

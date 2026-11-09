@@ -1335,7 +1335,14 @@ private fun PdfPageCard(
 
     LaunchedEffect(pageIndex, retryTrigger) {
         isLoading = true
-        pageBitmap = loadBitmap()
+        var bmp = loadBitmap()
+        // If initial load returned null or recycled bitmap (e.g. during heavy background OCR or rotation),
+        // give it a brief grace period to recover from renderer lock contention before showing error
+        if (bmp == null || bmp.isRecycled) {
+            kotlinx.coroutines.delay(120)
+            bmp = loadBitmap()
+        }
+        pageBitmap = if (bmp != null && !bmp.isRecycled) bmp else null
         isLoading = false
     }
 
