@@ -121,4 +121,38 @@ class ReaderViewModelAiIntegrationTest {
 
         assertTrue("Reader screen must be exited on subsequent back when AI assistant is closed", screenExited)
     }
+
+    @Test
+    fun testExperimentalAiFeature_hiddenByDefault_andToggleWorks() {
+        // Reset preferences to default
+        com.paperink.data.local.ExperimentalFeatures.setAiAssistantEnabled(application, false)
+        val freshVm = ReaderViewModel(application)
+
+        // 1. Verify hidden and disabled by default
+        assertFalse("AI Feature must be disabled/hidden by default", freshVm.uiState.value.isAiFeatureEnabled)
+        assertFalse("AI Assistant sheet must initially be closed", freshVm.uiState.value.showAiAssistant)
+
+        // 2. Enable via menu/toggle
+        freshVm.setAiFeatureEnabled(true)
+        assertTrue("AI Feature must be enabled after setAiFeatureEnabled(true)", freshVm.uiState.value.isAiFeatureEnabled)
+        assertTrue(
+            "Preference must be persisted",
+            com.paperink.data.local.ExperimentalFeatures.isAiAssistantEnabled(application)
+        )
+
+        // 3. Open assistant while enabled
+        freshVm.openAiAssistant()
+        assertTrue("AI Assistant sheet must be open", freshVm.uiState.value.showAiAssistant)
+
+        // 4. Disable via menu/toggle - must close the assistant sheet as well
+        freshVm.setAiFeatureEnabled(false)
+        assertFalse("AI Feature must be disabled", freshVm.uiState.value.isAiFeatureEnabled)
+        assertFalse("AI Assistant sheet must be closed when feature is disabled", freshVm.uiState.value.showAiAssistant)
+
+        // 5. Test toggleAiFeature()
+        freshVm.toggleAiFeature()
+        assertTrue("toggleAiFeature() must flip disabled to enabled", freshVm.uiState.value.isAiFeatureEnabled)
+        freshVm.toggleAiFeature()
+        assertFalse("toggleAiFeature() must flip enabled to disabled", freshVm.uiState.value.isAiFeatureEnabled)
+    }
 }

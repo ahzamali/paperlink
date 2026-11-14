@@ -193,7 +193,20 @@ fun AiAssistantBottomSheet(
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
-                            Spacer(modifier = Modifier.width(8.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.7f)
+                            ) {
+                                Text(
+                                    text = "Experimental",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(6.dp))
                             // Status pill
                             val (backendText, backendBg, backendFg) = when {
                                 state.isEngineInitializing -> Triple("Loading Model...", MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.onSurfaceVariant)
@@ -620,7 +633,7 @@ private fun ModelDownloadPromptView(onStartDownload: () -> Unit) {
         }
         Spacer(modifier = Modifier.height(16.dp))
         Text(
-            text = "Gemma 4 2B On-Device AI",
+            text = "Gemma 4 2B On-Device AI (Experimental)",
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onSurface

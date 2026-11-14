@@ -15,7 +15,8 @@ A modern, fast, privacy-focused Android PDF reader, annotator, and organizer cra
 
 ## Highlights & Features
 
-### 🤖 On-Device AI Assistant (Gemma 4 2B)
+### 🤖 On-Device AI Assistant (Experimental • Gemma 4 2B)
+- **Experimental Opt-In Toggle**: Kept hidden and disabled by default for a clean, distraction-free reading experience. Can be enabled on-demand at any time from the Reader's 3-dot overflow menu (**"AI Assistant (Experimental)"**), which reveals the quick-launch floating action button.
 - **100% Private, Local LLM**: Powered by Google Gemma 4 2B (`gemma-4-E2B-it.litertlm`) via Google's official `litertlm-android` Kotlin API. No prompts or document contents are ever transmitted to any cloud servers.
 - **Smart Context Budgeting & Local RAG**: Intelligently prevents on-device small model KV-cache overflow (`context too long`) using a safe 3,500 character context budget (~850 tokens), leaving ample space for conversational turns and generated answers within Gemma 2B's 2048 token limit.
 - **Three Dynamic Context Scoping Modes**:
@@ -29,7 +30,7 @@ A modern, fast, privacy-focused Android PDF reader, annotator, and organizer cra
   - 📋 **Action Items**: Identifies actionable tasks, deadlines, and recommendations.
   - 💬 **Interactive Q&A**: Multi-turn conversational chat with real-time token-by-token streaming and one-tap copy-to-clipboard.
 - **Model Manager**: In-app download manager for `gemma-4-E2B-it.litertlm` (~2.6 GB) with byte counters, background download resumption, scoped storage compatibility, and support for ADB side-loaded models.
-- **Always-Accessible AI FAB**: Quick-launch floating assistant available across all pages in the reader, designed with Nordic Ocean styling.
+- **Optional Quick-Launch AI FAB**: Floating assistant available across all pages in the reader once enabled in settings, designed with Nordic Ocean styling.
 
 ### 🔍 On-Device OCR & Searchable PDF Creation
 - **100% Offline ML Kit Recognition**: Executes Latin script text recognition on-device with Google ML Kit with zero cloud dependency.

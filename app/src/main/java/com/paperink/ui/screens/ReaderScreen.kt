@@ -108,6 +108,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -213,17 +214,19 @@ fun ReaderScreen(
             }
     }
 
-    // Keep AI Assistant continuously synchronized with document text, current page, and OCR extraction
-    LaunchedEffect(uiState.document?.id, uiState.currentPageIndex, uiState.documentText) {
-        val info = viewModel.getDocumentContextInfo()
-        if (info.fallbackSnippet.isNotBlank() || info.pagesText.isNotEmpty()) {
-            aiViewModel.setDocumentContext(
-                title = info.title,
-                currentPageIndex = info.currentPageIndex,
-                totalPages = info.totalPages,
-                pagesText = info.pagesText,
-                fallbackSnippet = info.fallbackSnippet
-            )
+    // Keep AI Assistant continuously synchronized with document text, current page, and OCR extraction when enabled
+    LaunchedEffect(uiState.document?.id, uiState.currentPageIndex, uiState.documentText, uiState.isAiFeatureEnabled) {
+        if (uiState.isAiFeatureEnabled) {
+            val info = viewModel.getDocumentContextInfo()
+            if (info.fallbackSnippet.isNotBlank() || info.pagesText.isNotEmpty()) {
+                aiViewModel.setDocumentContext(
+                    title = info.title,
+                    currentPageIndex = info.currentPageIndex,
+                    totalPages = info.totalPages,
+                    pagesText = info.pagesText,
+                    fallbackSnippet = info.fallbackSnippet
+                )
+            }
         }
     }
 
@@ -525,6 +528,72 @@ fun ReaderScreen(
                                         viewModel.cycleReadingMode()
                                     },
                                     modifier = Modifier.testTag("menu_item_reading_mode")
+                                )
+
+                                HorizontalDivider()
+
+                                // Experimental AI Assistant Toggle & Quick Launch
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text("AI Assistant")
+                                                Text(
+                                                    text = if (uiState.isAiFeatureEnabled) "Experimental • Enabled" else "Experimental • Tap to enable",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = if (uiState.isAiFeatureEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                            Switch(
+                                                checked = uiState.isAiFeatureEnabled,
+                                                onCheckedChange = { isChecked ->
+                                                    viewModel.setAiFeatureEnabled(isChecked)
+                                                    if (isChecked) {
+                                                        val info = viewModel.getDocumentContextInfo()
+                                                        aiViewModel.setDocumentContext(
+                                                            title = info.title,
+                                                            currentPageIndex = info.currentPageIndex,
+                                                            totalPages = info.totalPages,
+                                                            pagesText = info.pagesText,
+                                                            fallbackSnippet = info.fallbackSnippet
+                                                        )
+                                                        viewModel.openAiAssistant()
+                                                        showOverflowMenu = false
+                                                    }
+                                                },
+                                                modifier = Modifier.testTag("menu_switch_ai_feature")
+                                            )
+                                        }
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Default.AutoAwesome,
+                                            contentDescription = "AI Assistant (Experimental)",
+                                            tint = if (uiState.isAiFeatureEnabled) com.paperink.ui.theme.OceanBlue else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    },
+                                    onClick = {
+                                        if (!uiState.isAiFeatureEnabled) {
+                                            viewModel.setAiFeatureEnabled(true)
+                                            val info = viewModel.getDocumentContextInfo()
+                                            aiViewModel.setDocumentContext(
+                                                title = info.title,
+                                                currentPageIndex = info.currentPageIndex,
+                                                totalPages = info.totalPages,
+                                                pagesText = info.pagesText,
+                                                fallbackSnippet = info.fallbackSnippet
+                                            )
+                                            viewModel.openAiAssistant()
+                                        } else {
+                                            viewModel.openAiAssistant()
+                                        }
+                                        showOverflowMenu = false
+                                    },
+                                    modifier = Modifier.testTag("menu_item_ai_feature")
                                 )
                             }
                         }
@@ -830,30 +899,32 @@ fun ReaderScreen(
             }
         },
         floatingActionButton = {
-            FloatingActionButton(
-                onClick = {
-                    val info = viewModel.getDocumentContextInfo()
-                    aiViewModel.setDocumentContext(
-                        title = info.title,
-                        currentPageIndex = info.currentPageIndex,
-                        totalPages = info.totalPages,
-                        pagesText = info.pagesText,
-                        fallbackSnippet = info.fallbackSnippet
+            if (uiState.isAiFeatureEnabled) {
+                FloatingActionButton(
+                    onClick = {
+                        val info = viewModel.getDocumentContextInfo()
+                        aiViewModel.setDocumentContext(
+                            title = info.title,
+                            currentPageIndex = info.currentPageIndex,
+                            totalPages = info.totalPages,
+                            pagesText = info.pagesText,
+                            fallbackSnippet = info.fallbackSnippet
+                        )
+                        viewModel.openAiAssistant()
+                    },
+                    containerColor = com.paperink.ui.theme.OceanBlue,
+                    contentColor = Color.White,
+                    shape = CircleShape,
+                    modifier = Modifier
+                        .testTag("ai_assistant_fab")
+                        .navigationBarsPadding()
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AutoAwesome,
+                        contentDescription = "PaperInk AI (Experimental - Gemma 4 2B)",
+                        modifier = Modifier.size(24.dp)
                     )
-                    viewModel.openAiAssistant()
-                },
-                containerColor = com.paperink.ui.theme.OceanBlue,
-                contentColor = Color.White,
-                shape = CircleShape,
-                modifier = Modifier
-                    .testTag("ai_assistant_fab")
-                    .navigationBarsPadding()
-            ) {
-                Icon(
-                    imageVector = Icons.Default.AutoAwesome,
-                    contentDescription = "PaperInk AI (Gemma 4 2B)",
-                    modifier = Modifier.size(24.dp)
-                )
+                }
             }
         }
     ) { innerPadding ->

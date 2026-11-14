@@ -68,7 +68,8 @@ data class ReaderUiState(
     val ocrProgress: Float = 0f,
     val ocrCurrentPage: Int = 0,
     val showOcrPrompt: Boolean = false,
-    // AI Assistant (Gemma 4 2B)
+    // AI Assistant (Experimental - Gemma 4 2B)
+    val isAiFeatureEnabled: Boolean = false,
     val showAiAssistant: Boolean = false,
     val documentText: String = "",
     // Compression
@@ -129,6 +130,8 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
         PdfEngine.init(application)
         val db = PaperInkDatabase.getDatabase(application)
         repository = DocumentRepository(db.paperInkDao(), application)
+        val aiEnabled = com.paperink.data.local.ExperimentalFeatures.isAiAssistantEnabled(application)
+        _uiState.update { it.copy(isAiFeatureEnabled = aiEnabled) }
     }
 
     fun loadDocument(documentId: Long) {
@@ -343,6 +346,20 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
         }
+    }
+
+    fun setAiFeatureEnabled(enabled: Boolean) {
+        com.paperink.data.local.ExperimentalFeatures.setAiAssistantEnabled(getApplication(), enabled)
+        _uiState.update {
+            it.copy(
+                isAiFeatureEnabled = enabled,
+                showAiAssistant = if (!enabled) false else it.showAiAssistant
+            )
+        }
+    }
+
+    fun toggleAiFeature() {
+        setAiFeatureEnabled(!_uiState.value.isAiFeatureEnabled)
     }
 
     fun openAiAssistant() {
