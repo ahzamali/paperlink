@@ -155,4 +155,34 @@ class ReaderViewModelAiIntegrationTest {
         freshVm.toggleAiFeature()
         assertFalse("toggleAiFeature() must flip enabled to disabled", freshVm.uiState.value.isAiFeatureEnabled)
     }
+
+    @Test
+    fun testFirstRun_onboardingCompletionAndAiOptIn() {
+        // Reset state
+        com.paperink.data.local.ExperimentalFeatures.setFirstRunCompleted(application, false)
+        com.paperink.data.local.ExperimentalFeatures.setAiAssistantEnabled(application, false)
+
+        // 1. Fresh install should not have completed first run
+        assertFalse(
+            "First run must initially be false on fresh install",
+            com.paperink.data.local.ExperimentalFeatures.isFirstRunCompleted(application)
+        )
+        assertFalse(
+            "AI assistant must be disabled by default",
+            com.paperink.data.local.ExperimentalFeatures.isAiAssistantEnabled(application)
+        )
+
+        // 2. Simulate user enabling AI in onboarding dialog and tapping 'Get Started'
+        com.paperink.data.local.ExperimentalFeatures.setAiAssistantEnabled(application, true)
+        com.paperink.data.local.ExperimentalFeatures.setFirstRunCompleted(application, true)
+
+        assertTrue(
+            "First run must be marked as completed",
+            com.paperink.data.local.ExperimentalFeatures.isFirstRunCompleted(application)
+        )
+        assertTrue(
+            "AI assistant must be enabled if user opted in during onboarding",
+            com.paperink.data.local.ExperimentalFeatures.isAiAssistantEnabled(application)
+        )
+    }
 }

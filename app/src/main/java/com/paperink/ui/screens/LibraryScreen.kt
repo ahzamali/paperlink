@@ -26,14 +26,17 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.CallMerge
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.automirrored.filled.TrendingDown
-import androidx.compose.material.icons.filled.CallMerge
 import androidx.compose.material.icons.filled.Coffee
+import com.paperink.data.local.ExperimentalFeatures
 import com.paperink.ui.components.CompressPdfDialog
 import com.paperink.ui.components.MergePdfDialog
 import com.paperink.ui.components.MergeableItem
 import com.paperink.ui.components.SupportDevelopmentDialog
+import com.paperink.ui.components.WelcomeOnboardingDialog
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
@@ -62,6 +65,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -122,6 +126,9 @@ fun LibraryScreen(
     var removeDocTarget by remember { mutableStateOf<DocumentEntity?>(null) }
     var showSortMenu by remember { mutableStateOf(false) }
     var isSearchExpanded by remember { mutableStateOf(false) }
+    var showWelcomeDialog by remember {
+        mutableStateOf(!ExperimentalFeatures.isFirstRunCompleted(context))
+    }
 
     // Opens PDF directly from mass storage location using Storage Access Framework
     val pdfPickerLauncher = rememberLauncherForActivityResult(
@@ -229,7 +236,7 @@ fun LibraryScreen(
                         onClick = { viewModel.openMergeDialog() },
                         modifier = Modifier.testTag("merge_pdfs_button")
                     ) {
-                        Icon(Icons.Default.CallMerge, contentDescription = "Merge PDFs")
+                        Icon(Icons.AutoMirrored.Filled.CallMerge, contentDescription = "Merge PDFs")
                     }
 
                     // Open from URL button
@@ -284,6 +291,22 @@ fun LibraryScreen(
                                     viewModel.setSortMode(SortMode.SIZE)
                                     showSortMenu = false
                                 }
+                            )
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text("Welcome & Features Guide") },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Default.Info,
+                                        contentDescription = "Welcome Guide",
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                },
+                                onClick = {
+                                    showSortMenu = false
+                                    showWelcomeDialog = true
+                                },
+                                modifier = Modifier.testTag("menu_welcome_guide")
                             )
                         }
                     }
@@ -468,6 +491,13 @@ fun LibraryScreen(
             onSaveToDownloads = { res ->
                 viewModel.saveMergedPdfToDownloads(res)
             }
+        )
+    }
+
+    // Welcome Flash Onboarding Dialog (First Run / User Guide)
+    if (showWelcomeDialog) {
+        WelcomeOnboardingDialog(
+            onDismiss = { showWelcomeDialog = false }
         )
     }
 
