@@ -184,5 +184,12 @@ class ReaderViewModelAiIntegrationTest {
             "AI assistant must be enabled if user opted in during onboarding",
             com.paperink.data.local.ExperimentalFeatures.isAiAssistantEnabled(application)
         )
+
+        // 3. Verify analytics consent can be set during onboarding
+        com.paperink.data.local.ExperimentalFeatures.setAnalyticsEnabled(application, false)
+        assertFalse(
+            "Analytics can be opted out during onboarding",
+            com.paperink.data.local.ExperimentalFeatures.isAnalyticsEnabled(application)
+        )
     }
 }

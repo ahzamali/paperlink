@@ -148,7 +148,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.paperink.data.model.ReadingMode
 import com.paperink.data.model.ToolType
 import com.paperink.ui.components.AnnotationCanvas
+import com.paperink.ui.components.BugReportDialog
 import com.paperink.ui.components.ColorPickerRow
+import androidx.compose.material.icons.filled.BugReport
 import com.paperink.ui.components.ExportBottomSheet
 import com.paperink.ui.components.ReadingModeFilters
 import com.paperink.ui.theme.SepiaBackground
@@ -191,6 +193,7 @@ fun ReaderScreen(
     var showClearConfirm by remember { mutableStateOf(false) }
     var showSaveToOriginalConfirm by remember { mutableStateOf(false) }
     var showOverflowMenu by remember { mutableStateOf(false) }
+    var showBugReportDialog by remember { mutableStateOf(false) }
 
     // Zoom & Pan state
     var zoomScale by remember { mutableFloatStateOf(1f) }
@@ -594,6 +597,25 @@ fun ReaderScreen(
                                         showOverflowMenu = false
                                     },
                                     modifier = Modifier.testTag("menu_item_ai_feature")
+                                )
+
+                                HorizontalDivider()
+
+                                // Report a Bug / Feedback
+                                DropdownMenuItem(
+                                    text = { Text("Report a Bug / Feedback") },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Default.BugReport,
+                                            contentDescription = "Report a Bug",
+                                            tint = MaterialTheme.colorScheme.error
+                                        )
+                                    },
+                                    onClick = {
+                                        showOverflowMenu = false
+                                        showBugReportDialog = true
+                                    },
+                                    modifier = Modifier.testTag("menu_item_report_bug")
                                 )
                             }
                         }
@@ -1342,6 +1364,14 @@ fun ReaderScreen(
                     Text("Cancel")
                 }
             }
+        )
+    }
+
+    // Bug Report & Feedback Dialog
+    if (showBugReportDialog) {
+        BugReportDialog(
+            onDismiss = { showBugReportDialog = false },
+            initialCategory = "PDF Viewer"
         )
     }
 

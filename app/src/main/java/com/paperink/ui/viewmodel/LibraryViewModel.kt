@@ -29,6 +29,7 @@ import com.paperink.data.model.TextAnnotation
 import com.paperink.data.model.MergeResult
 import com.paperink.ui.components.MergeableItem
 import com.paperink.ui.components.formatFileSize
+import com.paperink.util.TelemetryManager
 import java.io.File
 
 enum class SortMode {
@@ -314,6 +315,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
         isGrayscale: Boolean = false,
         revertIfLarger: Boolean = false
     ) {
+        TelemetryManager.logFeatureUsed(getApplication(), "compress_pdf", "level", level.name)
         viewModelScope.launch {
             _isCompressing.value = true
             val context = getApplication<Application>()
@@ -455,6 +457,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
             _userMessage.value = "Please select at least 2 documents to merge"
             return
         }
+        TelemetryManager.logFeatureUsed(getApplication(), "merge_pdf")
 
         viewModelScope.launch {
             _isMerging.value = true

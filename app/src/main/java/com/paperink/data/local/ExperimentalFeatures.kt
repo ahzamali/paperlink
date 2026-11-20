@@ -3,14 +3,17 @@ package com.paperink.data.local
 import android.content.Context
 
 /**
- * Manages preferences and flags for experimental features and onboarding in PaperInk PDF.
- * Experimental features (such as on-device AI Assistant powered by Gemma 4 2B)
- * are hidden and disabled by default, and can be enabled via user menu options or first-run onboarding.
+ * Manages preferences and flags for experimental features, onboarding, and
+ * anonymous privacy-respecting telemetry in PaperInk PDF.
+ *
+ * - Experimental features (such as Gemma 4 2B on-device AI) are disabled by default.
+ * - Anonymous analytics and crash diagnostics are opt-in enabled by default with transparent user controls.
  */
 object ExperimentalFeatures {
     private const val PREFS_NAME = "paperink_experimental_features"
     const val KEY_AI_ASSISTANT_ENABLED = "experimental_ai_assistant_enabled"
     const val KEY_FIRST_RUN_COMPLETED = "first_run_completed"
+    const val KEY_ANALYTICS_ENABLED = "anonymous_analytics_enabled"
 
     /**
      * Returns whether the experimental AI Assistant feature is enabled.
@@ -53,5 +56,32 @@ object ExperimentalFeatures {
     fun setFirstRunCompleted(context: Context, completed: Boolean = true) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().putBoolean(KEY_FIRST_RUN_COMPLETED, completed).apply()
+    }
+
+    /**
+     * Returns whether anonymous usage analytics and crash reporting are enabled.
+     * Defaults to true (opt-in enabled by default, configured via onboarding flash screen or settings).
+     */
+    fun isAnalyticsEnabled(context: Context): Boolean {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getBoolean(KEY_ANALYTICS_ENABLED, true)
+    }
+
+    /**
+     * Persists the user preference for enabling or disabling anonymous analytics and crash reports.
+     */
+    fun setAnalyticsEnabled(context: Context, enabled: Boolean) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putBoolean(KEY_ANALYTICS_ENABLED, enabled).apply()
+        com.paperink.util.TelemetryManager.updateCollectionState(context, enabled)
+    }
+
+    /**
+     * Toggles the anonymous analytics feature and returns the new state.
+     */
+    fun toggleAnalyticsEnabled(context: Context): Boolean {
+        val newState = !isAnalyticsEnabled(context)
+        setAnalyticsEnabled(context, newState)
+        return newState
     }
 }

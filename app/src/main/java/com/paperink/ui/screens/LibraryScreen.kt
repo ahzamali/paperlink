@@ -36,6 +36,10 @@ import com.paperink.ui.components.MergePdfDialog
 import com.paperink.ui.components.MergeableItem
 import com.paperink.ui.components.SupportDevelopmentDialog
 import com.paperink.ui.components.WelcomeOnboardingDialog
+import com.paperink.ui.components.BugReportDialog
+import com.paperink.ui.components.PrivacySettingsDialog
+import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DarkMode
@@ -129,6 +133,8 @@ fun LibraryScreen(
     var showWelcomeDialog by remember {
         mutableStateOf(!ExperimentalFeatures.isFirstRunCompleted(context))
     }
+    var showBugReportDialog by remember { mutableStateOf(false) }
+    var showPrivacySettingsDialog by remember { mutableStateOf(false) }
 
     // Opens PDF directly from mass storage location using Storage Access Framework
     val pdfPickerLauncher = rememberLauncherForActivityResult(
@@ -307,6 +313,37 @@ fun LibraryScreen(
                                     showWelcomeDialog = true
                                 },
                                 modifier = Modifier.testTag("menu_welcome_guide")
+                            )
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text("Privacy & Diagnostics") },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Default.Security,
+                                        contentDescription = "Privacy Settings",
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                },
+                                onClick = {
+                                    showSortMenu = false
+                                    showPrivacySettingsDialog = true
+                                },
+                                modifier = Modifier.testTag("menu_privacy_settings")
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Report a Bug / Feedback") },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Default.BugReport,
+                                        contentDescription = "Report a Bug",
+                                        tint = MaterialTheme.colorScheme.error
+                                    )
+                                },
+                                onClick = {
+                                    showSortMenu = false
+                                    showBugReportDialog = true
+                                },
+                                modifier = Modifier.testTag("menu_report_bug")
                             )
                         }
                     }
@@ -498,6 +535,20 @@ fun LibraryScreen(
     if (showWelcomeDialog) {
         WelcomeOnboardingDialog(
             onDismiss = { showWelcomeDialog = false }
+        )
+    }
+
+    // Bug Report & Feedback Dialog
+    if (showBugReportDialog) {
+        BugReportDialog(
+            onDismiss = { showBugReportDialog = false }
+        )
+    }
+
+    // Privacy & Diagnostics Settings Dialog
+    if (showPrivacySettingsDialog) {
+        PrivacySettingsDialog(
+            onDismiss = { showPrivacySettingsDialog = false }
         )
     }
 

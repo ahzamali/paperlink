@@ -58,12 +58,16 @@ fun WelcomeOnboardingDialog(
     var isAiEnabled by remember {
         mutableStateOf(ExperimentalFeatures.isAiAssistantEnabled(context))
     }
+    var isAnalyticsEnabled by remember {
+        mutableStateOf(ExperimentalFeatures.isAnalyticsEnabled(context))
+    }
     val scrollState = rememberScrollState()
 
     AlertDialog(
         onDismissRequest = {
             ExperimentalFeatures.setFirstRunCompleted(context, true)
             ExperimentalFeatures.setAiAssistantEnabled(context, isAiEnabled)
+            ExperimentalFeatures.setAnalyticsEnabled(context, isAnalyticsEnabled)
             onDismiss()
         },
         modifier = modifier
@@ -182,6 +186,44 @@ fun WelcomeOnboardingDialog(
                         )
                     }
                 }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Anonymous Analytics & Crash Reporting Opt-In (Enabled by default)
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Anonymous Analytics & Crash Reports",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Help improve PaperInk. Document contents, titles, and personal files are NEVER collected.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = isAnalyticsEnabled,
+                            onCheckedChange = { isAnalyticsEnabled = it },
+                            modifier = Modifier.testTag("onboarding_analytics_switch")
+                        )
+                    }
+                }
             }
         },
         confirmButton = {
@@ -189,6 +231,7 @@ fun WelcomeOnboardingDialog(
                 onClick = {
                     ExperimentalFeatures.setFirstRunCompleted(context, true)
                     ExperimentalFeatures.setAiAssistantEnabled(context, isAiEnabled)
+                    ExperimentalFeatures.setAnalyticsEnabled(context, isAnalyticsEnabled)
                     onDismiss()
                 },
                 modifier = Modifier

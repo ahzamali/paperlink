@@ -38,6 +38,7 @@ import kotlinx.coroutines.flow.update
 import java.io.File
 import java.io.FileOutputStream
 import com.paperink.util.ShareHelper
+import com.paperink.util.TelemetryManager
 
 data class ReaderUiState(
     val document: DocumentEntity? = null,
@@ -150,6 +151,12 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
             // Quick non-blocking background check for cached OCR or text extraction
             checkAndLoadOcrCache(doc)
 
+            // Log anonymous document handling telemetry (size bucket & page count bucket)
+            val fileLength = withContext(Dispatchers.IO) {
+                try { File(doc.filePath).length() } catch (_: Throwable) { 0L }
+            }
+            TelemetryManager.logPdfOpened(getApplication(), fileLength, doc.pageCount, doc.isImageBased)
+
             // Check if password protected
             val isProtected = withContext(Dispatchers.IO) {
                 doc.tags.contains("Protected") ||
@@ -254,6 +261,7 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
     fun runOcr() {
         val doc = _uiState.value.document ?: return
         if (_uiState.value.isOcrScanning) return
+        TelemetryManager.logFeatureUsed(getApplication(), "ocr_scan")
         ocrJob?.cancel()
         ocrJob = viewModelScope.launch {
             _uiState.update {
@@ -338,6 +346,7 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
+                TelemetryManager.recordException(getApplication(), e, "ocr_scan")
                 _uiState.update {
                     it.copy(
                         isOcrScanning = false,
@@ -363,6 +372,7 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun openAiAssistant() {
+        TelemetryManager.logFeatureUsed(getApplication(), "ai_assistant_open")
         _uiState.update { it.copy(showAiAssistant = true) }
     }
 
@@ -670,6 +680,7 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
      */
     fun saveEdits(burnToPdfFile: Boolean = false) {
         val doc = _uiState.value.document ?: return
+        TelemetryManager.logFeatureUsed(getApplication(), if (burnToPdfFile) "save_flatten_pdf" else "save_annotations_db")
         viewModelScope.launch {
             _uiState.update { it.copy(isExporting = true) }
             try {
@@ -701,6 +712,7 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
+                TelemetryManager.recordException(getApplication(), e, "ocr_scan")
                 _uiState.update { it.copy(userMessage = "Save failed: ${e.message}") }
             } finally {
                 _uiState.update { it.copy(isExporting = false) }
@@ -727,6 +739,7 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
 
     fun printCurrentDocument(context: Context) {
         val doc = _uiState.value.document ?: return
+        TelemetryManager.logFeatureUsed(context, "print_document")
         // Non-destructively save annotations to database
         saveEdits(burnToPdfFile = false)
         val success = PdfPrintAdapter.printPdf(context, doc.filePath, doc.title, doc.pageCount)
@@ -779,6 +792,7 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
+                TelemetryManager.recordException(getApplication(), e, "ocr_scan")
                 _uiState.update { it.copy(userMessage = "Export failed: ${e.message}") }
             } finally {
                 _uiState.update { it.copy(isExporting = false) }
@@ -813,6 +827,7 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
+                TelemetryManager.recordException(getApplication(), e, "ocr_scan")
                 _uiState.update { it.copy(userMessage = "Image export failed: ${e.message}") }
             } finally {
                 _uiState.update { it.copy(isExporting = false) }
@@ -826,6 +841,7 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
 
     // In-PDF Search implementation
     fun openSearch() {
+        TelemetryManager.logFeatureUsed(getApplication(), "in_pdf_search")
         _uiState.update { it.copy(isSearchActive = true) }
     }
 
@@ -1082,6 +1098,7 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
+                TelemetryManager.recordException(getApplication(), e, "ocr_scan")
                 _uiState.update { it.copy(userMessage = "Failed to export compressed file") }
             }
         }

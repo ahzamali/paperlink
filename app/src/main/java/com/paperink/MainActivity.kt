@@ -23,6 +23,7 @@ import com.paperink.ui.screens.ReaderScreen
 import com.paperink.ui.theme.MyApplicationTheme
 import com.paperink.ui.viewmodel.LibraryViewModel
 import com.paperink.ui.viewmodel.ReaderViewModel
+import com.paperink.util.TelemetryManager
 
 class MainActivity : ComponentActivity() {
 
@@ -34,6 +35,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        TelemetryManager.init(this)
+        TelemetryManager.logAppOpen(this)
 
         setContent {
             val systemDark = isSystemInDarkTheme()
